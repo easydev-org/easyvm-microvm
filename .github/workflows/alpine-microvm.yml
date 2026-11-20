@@ -291,7 +291,13 @@ jobs:
         run: |
           set -eux
           docker cp alpine-microvm/steps/console.walk easyvm:/work/console.walk
-          docker exec easyvm /usr/local/bin/easyvm create /work/console.walk --work /work
+          # THE STATUS IS POLLED HERE, IN THE LOG, WHILE `create` WAITS. A create that times out
+          # after ten minutes says only that it did - the question a reader needs answered is WHAT
+          # the status said during that time, and the daemon's own log does not carry it.
+          docker exec -d easyvm sh -c 'for i in $(seq 1 40); do /usr/local/bin/easyvm status --work /work 2>&1 | head -4; echo "--- $i ---"; sleep 15; done >> /work/status.log 2>&1'
+          docker exec easyvm /usr/local/bin/easyvm create /work/console.walk --work /work || true
+          echo "=== status timeline ==="
+          docker exec easyvm cat /work/status.log 2>/dev/null | head -40 || true
           docker exec easyvm /usr/local/bin/easyvm status --work /work | tail -5
 
       # -------- the tun device, asserted from outside the guest --------
