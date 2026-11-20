@@ -165,29 +165,33 @@ jobs:
       #
       # `go build ./cmd/easyvm` and `docker build -f Containerfile` need the engine's tree, and
       # `actions/checkout` checks out only the repository that OWNS the workflow. So the engine is
-      # fetched first and this repository is laid over it by `tar` BELOW.
+      # fetched first and this repository is laid over it BELOW.
       #
-      # A SECOND `actions/checkout` WAS TRIED AND DOES NOT WORK HERE. With `path: .` it writes to the
-      # workspace root, and even with `clean: false` the action removes what a previous checkout put
-      # there; measured twice, both times as
-      #
-      #	##[error]The specified go version file at: go.mod does not exist
-      #
-      # - a message that names the missing file rather than the step that deleted it.
+      # A SECOND `actions/checkout` WAS TRIED AND DOES NOT WORK HERE: with `path: .` it writes to the
+      # workspace root, and even `clean: false` leaves the action removing what a previous checkout
+      # put there. Measured twice, both times as `go.mod does not exist`.
       - uses: actions/checkout@v4
         with:
           repository: easydev-org/easyvm
           ref: main
 
+      # AND THIS REPOSITORY IS ALREADY ON DISK, because the workflow that is running belongs to it.
+      # `actions/checkout` fetched it into `$GITHUB_WORKSPACE` before any of this, which the engine
+      # checkout then replaced - so it is fetched ONCE MORE, into its own directory, and copied over.
+      #
+      # THE WALKTHROUGHS, THE ROOTFS SCRIPTS AND `shapes/`, AND NOTHING ELSE. Copying the engine's own
+      # directories back over themselves is what a `for d in */` loop did on the first attempt, and it
+      # copied `cmd/` over `cmd/` while the walkthroughs were never on disk at all.
       - name: lay this repository over the engine
         run: |
           set -eux
-          # THE WALKTHROUGHS AND THE ROOTFS SCRIPTS, AND NOTHING ELSE. `shapes/` comes too: it is
-          # what a repository declares about the machines it starts.
-          for d in */ .github/ shapes/; do
+          git clone --quiet --depth 1 \
+            "https://github.com/${GITHUB_REPOSITORY}.git" /tmp/walkthroughs
+          for d in /tmp/walkthroughs/*/ /tmp/walkthroughs/.github/ /tmp/walkthroughs/shapes/; do
             if [ -e "$d" ]; then cp -a "$d" "$GITHUB_WORKSPACE/"; fi
           done
           ls -d cmd internal Containerfile go.mod
+          ls -d */ | head -20
 
       # THE PUBLISHED ARTIFACT, NOT A LOCAL BUILD. A boot test of a locally built image would prove
       # the script works and say nothing about the bytes a consumer actually downloads - and the
