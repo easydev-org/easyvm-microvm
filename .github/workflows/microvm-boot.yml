@@ -185,7 +185,14 @@ jobs:
       - name: lay this repository over the engine
         run: |
           set -eux
-          git clone --quiet --depth 1 \
+          # THE TOKEN, BECAUSE THIS REPOSITORY IS PRIVATE AND `git clone` cannot prompt:
+          #
+          #	fatal: could not read Username for 'https://github.com': No such device or address
+          #
+          # `dependency-pull` rather than a raw token in the URL: it is what `actions/checkout` itself
+          # uses, it is scoped to this run, and it appears in no log line.
+          git -c "http.https://github.com/.extraheader=Authorization: basic $(printf 'x-access-token:%s' "${{ github.token }}" | base64 -w0)" \
+            clone --quiet --depth 1 \
             "https://github.com/${GITHUB_REPOSITORY}.git" /tmp/walkthroughs
           for d in /tmp/walkthroughs/*/ /tmp/walkthroughs/.github/ /tmp/walkthroughs/shapes/; do
             if [ -e "$d" ]; then cp -a "$d" "$GITHUB_WORKSPACE/"; fi
