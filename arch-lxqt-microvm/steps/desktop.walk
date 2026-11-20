@@ -1,0 +1,41 @@
+# AN ARCH LINUX MICROVM RUNNING LXQt ON AN X SERVER IN MEMORY.
+#
+# THE SAME SHAPE AS THE SWAY VARIANT, WITH ONE STRUCTURAL DIFFERENCE: THIS IS X11, SO THE
+# DISPLAY SERVER IS `Xvfb` AND THE CAPTURE PATH IS XSHM RATHER THAN wlr-screencopy.
+#
+# WHY AN X SERVER AT ALL, AND WHY THAT ONE. A microvm has no GPU and, without vkms, no DRM
+# node; Xorg's `modesetting` driver has nothing to open. `Xvfb` needs neither - it renders
+# into its own process memory - which is why the whole X11 family works on a machine that
+# cannot run Xorg. MEASURED: LXQt draws a panel with four workspace buttons and a clock.
+#
+# EVERY X11 DESKTOP NEEDS A SESSION BUS, and this image gives it one: `dbus-run-session`
+# wraps the session manager. MEASURED on XFCE before that line existed, the desktop started
+# and drew "Unable to contact settings server / Could not connect", which is what a desktop
+# without a bus looks like.
+#
+# The assertion is the session manager, because every widget name in that panel is localised
+# and would make a fragile test.
+
+walkthrough "lxqt microvm - LXQt on xvfb, captured over xshm"
+  resolution 1024x768
+  recording_resolution 1024x768
+
+  needs arch-vmlinuz arch-initramfs arch.qcow2
+  disk arch.qcow2
+
+  boot as a microvm from kernel "arch-vmlinuz" and initramfs "arch-initramfs" with "console=ttyS0 root=/dev/vda rw rootfstype=ext4" without a display with memory 1536, waiting up to 240s
+
+  # THE CONSOLE REACHES A LOGIN, which is the boot working.
+  the console will say "login"
+
+  # AND THE SESSION IS vmuser's - PipeWire refuses root (`ConditionUser=!root`) and every
+  # desktop here goes through it for audio.
+  the console will say "vmuser"
+
+  # THE SESSION MANAGER ITSELF. A desktop that could not start leaves the console quiet;
+  # this line is the manager's own name, printed once it is running.
+  the console will say "startlxqt"
+
+  wait 20s
+
+  stop the machine by killing it, waiting up to 60s

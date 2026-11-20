@@ -1,0 +1,64 @@
+# A DEBIAN MICROVM WITH NO DESKTOP: KERNEL, INITRAMFS, ROOT FILESYSTEM, SERIAL LOGIN.
+#
+# THIS IS THE THIRD OF THE THREE HEADLESS MICROVMS - Alpine, Debian, NixOS - and it is the one that
+# took the longest to make boot, because Debian is the distribution whose kernel REFUSES the trick
+# the other two get for free.
+#
+# A microvm with `pcie=off` has no PCI bus, so its disk arrives as virtio-over-MMIO. qemu offers to
+# name that device on the kernel command line, and a kernel only accepts the offer if it was built
+# with CONFIG_VIRTIO_MMIO_CMDLINE_DEVICES. MEASURED, out of each distribution's own `boot/config-*`:
+#
+#	Alpine 3.21   CONFIG_VIRTIO_MMIO=y   CMDLINE_DEVICES=y                  finds /dev/vda
+#	NixOS 6.18    CONFIG_VIRTIO_MMIO=m   CMDLINE_DEVICES=y                  finds /dev/vda
+#	Debian 6.12   CONFIG_VIRTIO_MMIO=m   # CMDLINE_DEVICES is not set        no /dev/vda
+#	Void 6.12     CONFIG_VIRTIO_MMIO=m   (option not present)               no /dev/vda
+#
+# The engine answers that with `acpi=on` on the machine type, still with `pcie=off`, so qemu
+# describes the same MMIO devices in a DSDT that every one of those kernels can read. That is why
+# this file needs no distribution-specific flag and no patched kernel.
+#
+# NOTHING HERE INSTALLS DEBIAN. A microvm has no firmware to read a boot sector, so qemu is handed
+# the kernel and the initramfs directly and the disk has to arrive holding a system. `.github/
+# debian-rootfs.sh` builds the three files; this walkthrough boots them and reads the console.
+#
+# THE ASSERTION IS THE SERIAL LINE, NOT A SCREEN. There is no framebuffer on this machine - a GPU
+# needs PCIe - so `microvm_display serial` is stated rather than assumed, and the recording is the
+# "NO DISPLAY" card the recorder draws while a guest has no adapter.
+
+walkthrough "debian microvm - a root filesystem, a serial login, and no PCIe"
+  resolution 1024x768
+  # THE VIDEO IS AN ARTIFACT EVEN WHEN THE GUEST DRAWS NOTHING, so its size is stated.
+  recording_resolution 1024x768
+
+  # THE THREE FILES THE CI STEP BUILDS, named here so the boot step can refer to them.
+  needs debian-vmlinuz debian-initramfs debian.qcow2
+
+  # THE ROOT FILESYSTEM, BUILT BY THE CI STEP AND NOT INSTALLED BY THIS FILE.
+  disk debian.qcow2
+
+  # `without a display` AND NOT `with a console`: this guest has no VGA adapter at all, which is the
+  # honest shape for a machine with no PCIe. `with a console` would have the engine attach an ISA VGA
+  # adapter that nothing ever draws on, and the recording would be a black field rather than a stated
+  # absence. The phrase is part of the boot sentence - there is no separate key - which is why the
+  # three shapes read as English: `with a desktop`, `with a console`, `without a display`.
+  #
+  # `rootfstype=ext4` IS NAMED BECAUSE THE INITRAMFS NEEDS TO AGREE WITH THE IMAGE. The disk is ext4
+  # by construction; saying so keeps a future initramfs from probing for it, and `console=ttyS0` is
+  # the only place this guest can be read.
+  boot as a microvm from kernel "debian-vmlinuz" and initramfs "debian-initramfs" with "console=ttyS0 root=/dev/vda rw rootfstype=ext4" without a display with memory 1024, waiting up to 180s
+
+  # THE FIRST FACT: the kernel found the disk. Without `acpi=on` this never appears, and the guest
+  # instead reaches `ALERT! /dev/vda does not exist. Dropping to a shell!` after 30 seconds of
+  # `Begin: Running /scripts/local-block ... done.` - which is what a wrong machine type looks like.
+  the console will say "vda"
+
+  # AND THE SECOND: init finished and a login is waiting. This is the fact the file exists to
+  # establish - a distribution whose kernel refuses the microvm's default disk transport still
+  # comes all the way up, because the transport it DOES accept is available.
+  the console will say "login"
+
+  # TWENTY SECONDS OF A GUEST AT A PROMPT, so the recording is a machine that stayed up rather than
+  # a boot log that scrolled past.
+  wait 20s
+
+  stop the machine by killing it, waiting up to 60s

@@ -1,0 +1,43 @@
+# A Fedora MICROVM WITH NO DESKTOP: KERNEL, INITRAMFS, ROOT FILESYSTEM, SERIAL LOGIN.
+#
+# THE SAME SHAPE AS THE ALPINE, DEBIAN AND NIXOS MICROVMS: a kernel, an initramfs, and ONE FLAT ext4
+# qcow2 with no partition table, booted with `-kernel` because a microvm has no firmware to read a
+# boot sector.
+# MEASURED: `CONFIG_VIRTIO_BLK=y` and `CONFIG_EXT4_FS=y` ARE BUILT IN, so the only module the
+# initramfs carries is `virtio_mmio` (which is `=m`). A guest with no initramfs at all panics with
+# `VFS: Cannot open root device "/dev/vda"` - the module that makes the device appear is not there.
+# NOTHING HERE INSTALLS fedora. `.github/fedora-rootfs.sh` builds the three files; this walkthrough
+# boots them and reads the console.
+#
+# THE ASSERTION IS THE SERIAL LINE, NOT A SCREEN. There is no framebuffer on this machine - a GPU
+# needs PCIe, and `pcie=off` means there is none - so the recording is the "NO DISPLAY" card the
+# recorder draws while a guest has no adapter.
+
+walkthrough "fedora microvm - a root filesystem, a serial login, and no PCIe"
+  resolution 1024x768
+  recording_resolution 1024x768
+
+  # THE THREE FILES THE CI STEP BUILDS, named here so the boot step can refer to them.
+  needs fedora-vmlinuz fedora-initramfs fedora.qcow2
+
+  # THE ROOT FILESYSTEM, BUILT BY THE CI STEP AND NOT INSTALLED BY THIS FILE.
+  disk fedora.qcow2
+
+  # `without a display` AND NOT `with a console`: this guest has no VGA adapter at all, which is the
+  # honest shape for a machine with no PCIe.
+  #
+  # `rootfstype=ext4` IS NAMED BECAUSE THE INITRAMFS NEEDS TO AGREE WITH THE IMAGE. `console=ttyS0`
+  # is the only place this guest can be read.
+  boot as a microvm from kernel "fedora-vmlinuz" and initramfs "fedora-initramfs" with "console=ttyS0 root=/dev/vda rw rootfstype=ext4" without a display with memory 1024, waiting up to 180s
+
+  # THE FIRST FACT: the kernel found the disk. Without `acpi=on` this never appears, and the guest
+  # reaches `ALERT! /dev/vda does not exist` or a `VFS: Cannot open root device` panic instead.
+  the console will say "vda"
+
+  # THE SECOND: init finished and a login is waiting.
+  the console will say "login"
+
+  # TWENTY SECONDS OF A GUEST AT A PROMPT, so the recording is a machine that stayed up.
+  wait 20s
+
+  stop the machine by killing it, waiting up to 60s

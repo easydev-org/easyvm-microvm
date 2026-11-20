@@ -1,0 +1,50 @@
+# A DEBIAN MICROVM WITH AN XFCE DESKTOP, STREAMED BY easystream.
+#
+# THE DESKTOP IS REAL AND IT IS NOT ON A GPU. MEASURED: a microvm has no firmware and no PCIe, so it
+# has neither a DRM node nor /dev/fb0 - `modesetting` finds no screen and `fbdev` finds no
+# framebuffer. `Xvfb` renders into the process's own memory instead, which needs no graphics device
+# at all, and easystream reads those pixels through the X protocol (XSHM/XGetImage) and encodes them
+# to H.264. That is the same shape e2b's desktop template uses.
+#
+# `with a desktop` HERE MEANS "START A DESKTOP IN THE GUEST", WHICH IS THE ONLY SENSE IT CAN HAVE ON
+# A MICROVM. It is not `virtio-gpu-device`: that adapter attaches and its driver never binds (virtio
+# status 0x83, NEEDS_RESET, no /dev/dri/card0), which was measured before this design replaced it.
+#
+# THREE SERVICES RUN INSIDE THE GUEST, EACH IN ITS FILE:
+#
+#	xvfb        the in-memory framebuffer on :0
+#	xfce        the session, which attaches to DISPLAY=:0
+#	easystream  capture + H.264 + est://48079 and its HTTP surface on 48080
+#
+# NOTHING HERE ASSERTS ON A PICTURE. A screen-reading assertion needs a reference frame and a match
+# threshold; what this file proves is that the three services reached the state where a picture
+# exists, and `/est/ws` is what carries it to a browser.
+
+walkthrough "debian microvm - xfce on xvfb, streamed by easystream"
+  resolution 1024x768
+  recording_resolution 1024x768
+
+  needs debian-vmlinuz debian-initramfs debian.qcow2
+
+  disk debian.qcow2
+
+  # `tty0` AS WELL AS `ttyS0` so the kernel's own messages reach the screen. `without a display`
+  # because there is no adapter to attach - the desktop does not use one.
+  boot as a microvm from kernel "debian-vmlinuz" and initramfs "debian-initramfs" with "console=tty0 console=ttyS0 root=/dev/vda rw rootfstype=ext4" without a display with memory 1536, waiting up to 180s
+
+  # THE FIRST FACT: X IS UP. `Xvfb` prints this when the server is ready, and it can only appear if
+  # the server started without a graphics device - which is the claim this whole design rests on.
+  the console will say "Xvfb"
+
+  # AND THE SECOND: the session attached to it. `xfce4-session` is what draws; the line below is its
+  # own startup notice.
+  the console will say "xfce4-session"
+
+  # AND THE THIRD: the stream is listening. easystream prints both ports as it binds them.
+  the console will say "easystream est server"
+
+  # THIRTY SECONDS OF A RUNNING DESKTOP, so the recording is a machine that stayed up rather than a
+  # boot log that scrolled past.
+  wait 30s
+
+  stop the machine by killing it, waiting up to 60s

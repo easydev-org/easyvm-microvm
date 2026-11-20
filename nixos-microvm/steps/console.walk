@@ -1,0 +1,90 @@
+# A NIXOS MICROVM WITH NO DESKTOP: KERNEL, INITRAMFS, ONE FLAT ext4 ROOT, A SERIAL LOGIN.
+#
+# THIS IS THE THIRD OF THE THREE HEADLESS MICROVMS - Alpine, Debian, NixOS - AND IT IS THE SAME SHAPE
+# AS THE OTHER TWO: a kernel, an initramfs, and one flat ext4 qcow2 with no partition table. That is
+# deliberate. NixOS was first built the microvm.nix way - `/` a tmpfs, the system one READ-ONLY erofs
+# image at /nix/store - and it booted, but the artifact was a `store.img` in a format neither twin
+# used, and the guest could not change itself because a read-only store has nowhere to put a new
+# store path. A flat ext4 root pays neither cost: /nix/store is an ordinary writable directory, so
+# `nixos-rebuild` works inside the machine, and the disk is the same kind of object as the
+# other two.
+#
+# THE THREE FILES ARE BUILT IN CI AND CARRIED BACK, because NixOS is not a disk image anybody can
+# download - it is a description of a system, and turning a description into a kernel and a
+# filesystem means evaluating it with Nix. The Alpine and Debian twins have a shell script that
+# assembles their files; this one has `nixos-microvm/flake.nix` and a workflow.
+#
+# THE KERNEL IS NOT PATCHED AND DOES NOT NEED TO BE. The option that decides whether a kernel can
+# find an MMIO disk on a machine with no PCIe is CONFIG_VIRTIO_MMIO_CMDLINE_DEVICES, and MEASURED,
+# from each distribution's own `boot/config-*`:
+#
+#	Alpine 3.21   CONFIG_VIRTIO_MMIO=y   CMDLINE_DEVICES=y                  finds /dev/vda
+#	NixOS 6.18    CONFIG_VIRTIO_MMIO=m   CMDLINE_DEVICES=y                  finds /dev/vda
+#	Debian 6.12   CONFIG_VIRTIO_MMIO=m   # CMDLINE_DEVICES is not set        no /dev/vda
+#	Void 6.12     CONFIG_VIRTIO_MMIO=m   (option absent)                    no /dev/vda
+#
+# Nixpkgs sets the symbol unconditionally, so this guest finds its disk the way Alpine finds its
+# root. The workflow still reads the built kernel's `.config` and fails if the symbol is gone,
+# because a comment is not a check.
+#
+# `init=/nixos-system/init` IS WHY THIS FILE CAN BE WRITTEN AT ALL, and it took two failures to get
+# right. NixOS' initrd has a unit called `Find NixOS closure` that reads `init=` out of
+# /proc/cmdline, resolves it under the new root and `chroot`s to its directory. With no `init=` it
+# prints `No init= parameter on the kernel command line` and refuses to hand over - MEASURED, on a
+# guest whose ext4 root had mounted perfectly:
+#
+#	EXT4-fs (vda): mounted filesystem ... r/w with ordered data mode
+#	[FAILED] Failed to start Find NixOS closure.
+#	[DEPEND] Dependency failed for Initrd Default Target.
+#	You are in emergency mode...
+#
+# A bootloader would normally supply that argument. A microvm has none. And it cannot be a store
+# hash typed here, because the hash changes with every build - so the image carries a STABLE symlink
+# `/nixos-system` pointing at the build's toplevel, and this line names that instead. The same
+# instruction is correct forever.
+#
+# THE ASSERTIONS ARE THREE, IN THE ORDER A BOOT PRODUCES THEM, and each rules out a different
+# failure: a disk that was never claimed, a system that never reached userspace, and a console
+# nobody can log into.
+
+walkthrough "nixos microvm - a flat ext4 root, a serial login, and no PCIe"
+  resolution 1024x768
+  # THE VIDEO IS AN ARTIFACT EVEN WHEN THE GUEST DRAWS NOTHING, so its size is stated.
+  recording_resolution 1024x768
+
+  # THE THREE FILES THE WORKFLOW BUILDS, named so the boot step can refer to them.
+  needs nixos-kernel nixos-initrd nixos-rootfs.qcow2
+
+  # THE ROOT FILESYSTEM, BUILT IN CI AND NOT INSTALLED BY THIS FILE. A microvm has no firmware to
+  # read a boot sector, so the disk arrives holding a system.
+  disk nixos-rootfs.qcow2
+
+  # `with memory 1536` AND NOT THE DEFAULT, because this guest is not a minimal one: systemd, udev
+  # and a full NixOS closure start before the proof unit runs. 1536 rather than 2048 because
+  # microvm.nix documents that qemu hangs when the microvm machine gets exactly 2 GiB, and this
+  # machine type has the same constraint.
+  #
+  # `without a display` because there is no framebuffer to read: a GPU needs PCIe, and `pcie=off`.
+  boot as a microvm from kernel "nixos-kernel" and initramfs "nixos-initrd" with "console=ttyS0 root=/dev/vda rootfstype=ext4 rw init=/nixos-system/init" without a display with memory 1536, waiting up to 240s
+
+  # THE FIRST FACT: THE ROOT FILESYSTEM WAS MOUNTED, AND IT IS THE DEVICE THE MACHINE ATTACHED.
+  #
+  # `EXT4-fs (vda): mounted filesystem` is the kernel's own line when the initrd's switch-root has a
+  # working root. The device name matters: an MMIO disk that was never claimed shows up here as
+  # nothing at all, after thirty seconds of `Begin: Running /scripts/local-block ... done.`
+  the console will say "EXT4-fs (vda): mounted filesystem"
+
+  # AND THE SECOND, WHICH IS THE PROOF: a binary ON THE ROOT FILESYSTEM RAN. `NIXOS-MICROVM-READY`
+  # is echoed by a systemd unit whose `ExecStart` is a `/nix/store` path on /dev/vda, so this line
+  # is the state of the disk rather than the state of the initramfs.
+  the console will say "NIXOS-MICROVM-READY"
+
+  # AND THE THIRD: a login prompt, with autologin, which can only appear after systemd reached
+  # multi-user from a root it actually activated.
+  the console will say "login"
+
+  # TWENTY SECONDS OF A GUEST AT A PROMPT, so the recording is a machine that stayed up rather than
+  # a boot log that scrolled past.
+  wait 20s
+
+  stop the machine by killing it, waiting up to 60s

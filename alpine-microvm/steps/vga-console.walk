@@ -1,0 +1,58 @@
+# AN ALPINE MICROVM DRAWN ON THE VGA ADAPTER: A TEXT CONSOLE, RECORDED.
+#
+# THIS FILE WAS CALLED `desktop.walk` AND IT HAS NEVER STARTED A DESKTOP. MEASURED on 2026-11-18 by
+# taking the mp4 apart frame by frame: every frame after boot is
+#
+#	Welcome to Alpine Linux 3.21
+#	Kernel 6.12.117-0-virt on an x86_64 (/dev/tty1)
+#	(none) login:
+#
+# - a TEXT CONSOLE on the VGA adapter. `openbox` and `xorg-server` were installed in that image and
+# were never executed, so the recording was a picture of a login prompt wearing the name of a
+# desktop. The name was the bug; the recording was, and is, a real thing to prove.
+#
+# WHAT THIS FILE ACTUALLY PROVES, AND IT IS NOT NOTHING:
+#
+#	`console=tty0` makes the kernel mirror its output to the VGA adapter, so the guest DRAWS, and
+#	`see:` / `screendump` can photograph it. The mp4 is a picture of the guest rather than a black
+#	field - which is what the diskless netboot guest in `verify.walk` produces, because it draws
+#	nothing on the adapter at all.
+#
+# WHAT IT DOES NOT PROVE, AND WHY A DESKTOP CANNOT GO HERE:
+#
+#	A microvm has no firmware and no PCIe, and a desktop needs one of the two. MEASURED on both
+#	adapters this machine type can create:
+#
+#	  virtio-gpu-device   the device attaches, `virtio_gpu` loads, and its probe fails - the virtio
+#	                      status comes back as 0x83 (NEEDS_RESET) and no /dev/dri/card0 ever
+#	                      appears, so X answers `(EE) no screens found`
+#	  isa-vga             a text-mode adapter: no DRM node, and no /dev/fb0 either, because
+#	                      CONFIG_FB_VESA needs a VBE BIOS call and there is no firmware
+#
+#	`machine.Boot.Validate` now refuses `microvm_display: desktop` by name rather than recording a
+#	black field. A desktop is a q35 shape.
+
+walkthrough "alpine microvm - a text console drawn on the VGA adapter, recorded"
+  resolution 1024x768
+  # THE VIDEO IS THE ARTIFACT, so its size is stated rather than inherited.
+  recording_resolution 1024x768
+
+  needs alpine-vmlinuz alpine-initramfs alpine.qcow2
+
+  # THE ROOT FILESYSTEM, BUILT BY `.github/alpine-rootfs.sh` AND NOT INSTALLED BY THIS FILE.
+  disk alpine.qcow2
+
+  # `tty0` IS THE WHOLE POINT OF THIS FILE. `ttyS0` alone gives a guest that boots perfectly and a
+  # recording that is black, because the kernel only writes to the serial line and never touches the
+  # adapter. `with a console` asks for `-device isa-vga`, the text adapter a microvm can create.
+  boot as a microvm from kernel "alpine-vmlinuz" and initramfs "alpine-initramfs" with "console=tty0 console=ttyS0 root=/dev/vda rw rootfstype=ext4" with a console with memory 768, waiting up to 180s
+
+  # THE FIRST FACT: init finished and a getty is asking for a login. It is printed by Alpine's own
+  # getty, which lives in the ROOT FILESYSTEM, so it cannot appear unless /dev/vda was mounted.
+  the console will say "login"
+
+  # TWENTY SECONDS OF THAT PROMPT ON THE SCREEN, so the mp4 is a machine that stayed up rather than
+  # a boot log that scrolled past.
+  wait 20s
+
+  stop the machine by killing it, waiting up to 60s

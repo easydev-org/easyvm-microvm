@@ -1,0 +1,226 @@
+name: microvm-rootfs
+
+# BUILD THE ROOT FILESYSTEMS EVERY MICROVM TEST NEEDS, ONCE, AND PUBLISH THEM.
+#
+# ---------------------------------------------------------------------------------------------------
+# WHY THIS WORKFLOW EXISTS
+#
+# MEASURED: `grep -rl alpine-rootfs .github/workflows/` returned only the two workflows that BOOT an
+# alpine guest - and both of them built the root filesystem themselves. `linux/alpine-microvm/steps/
+# console.walk` had never run in CI before either, so nothing had ever needed the files twice and the
+# cost of rebuilding was never noticed.
+#
+# IT IS TEN MINUTES PER JOB, PAID AGAIN BY EVERY CONSUMER. The build downloads a minirootfs, runs `apk`
+# inside a chroot, generates an initramfs and writes an ext4 image - all of it deterministic, all of it
+# the same bytes on the same input. A test that boots a guest should not spend most of its budget
+# producing the disk it boots.
+#
+# ---------------------------------------------------------------------------------------------------
+# WHAT IS PUBLISHED, AND AS WHAT
+#
+# ONE TARBALL PER DISTRIBUTION, pushed to this repository's own ghcr package the same way the upstream
+# ISOs are (`artifacts-publish.yml`): `oci-push` mirrors a single file, so the three files a microvm
+# boots are tarred. Consumers pull the tarball and untar it.
+#
+#	ghcr.io/<repo>:rootfs-alpine-minimal
+#	ghcr.io/<repo>:rootfs-debian-minimal
+#	ghcr.io/<repo>:rootfs-debian-xfce
+#
+# THE TAG NAMES THE VARIANT AND NOT ONLY THE DISTRIBUTION, because Debian is TWO builds of one script
+# and a tag that said `rootfs-debian` would have to mean one of them. A consumer now asks for the
+# thing it wants: a system with no screen, or one with XFCE.
+#
+# THE TAG CARRIES NO VERSION, AND THAT IS DELIBERATE: a rootfs is a build of THIS COMMIT's scripts, so
+# a consumer on the same commit wants the same bytes. A version would let a test pin an image whose
+# scripts no longer match the tree, which is the failure this is meant to prevent rather than create.
+# The content changes when the script changes, and the push refuses identical bytes - so a re-run
+# without a script change is a no-op rather than a churn of the registry.
+#
+# NIXOS IS NOT HERE. Its root filesystem is the output of `nix build` against a flake, which needs a
+# nix store and a nix daemon that this `ubuntu-latest` job does not have - it builds inside a
+# `nixos/nix` container in `nixos-microvm.yml`, which publishes `rootfs-nixos-minimal` under the same
+# naming rule. The three tags above and that one are the four variants consumers may ask for.
+
+on:
+  push:
+    branches: ["**"]
+    # A ROOTFS ONLY CHANGES WHEN THE SCRIPT THAT MAKES IT DOES. Path filters keep this off every
+    # unrelated push, which matters because it builds three images.
+    paths:
+      - ".github/alpine-rootfs.sh"
+      - ".github/debian-rootfs.sh"
+      - ".github/fedora-rootfs.sh"
+      - ".github/ubuntu-rootfs.sh"
+      - ".github/arch-rootfs.sh"
+      - ".github/leap-rootfs.sh"
+      - ".github/fetch-image.py"
+      - ".github/make-initramfs.py"
+      - ".github/workflows/microvm-rootfs.yml"
+  pull_request:
+    paths:
+      - ".github/alpine-rootfs.sh"
+      - ".github/debian-rootfs.sh"
+      - ".github/fedora-rootfs.sh"
+      - ".github/ubuntu-rootfs.sh"
+      - ".github/arch-rootfs.sh"
+      - ".github/leap-rootfs.sh"
+      - ".github/fetch-image.py"
+      - ".github/make-initramfs.py"
+      - ".github/workflows/microvm-rootfs.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: microvm-rootfs-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ALPINE_VERSION: "3.21"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ALPINE HAS ONE SHAPE, SO ITS NAME IS THE ONE THAT SAYS WHAT THAT SHAPE IS.
+          - tag: rootfs-alpine-minimal
+            script: .github/alpine-rootfs.sh
+            # THE THREE FILES EACH SCRIPT WRITES, named once here so a consumer and this file cannot
+            # disagree about what a "rootfs" is.
+            files: "alpine-vmlinuz alpine-initramfs alpine.qcow2"
+          # DEBIAN IS TWO BUILDS OF ONE SCRIPT, DIFFERING ONLY IN `DESKTOP`. That switch exists
+          # because everything that makes a microvm boot - kernel, virtio modules, initramfs, fstab,
+          # autologin, DHCP - is identical between them, and a second script would be a copy that
+          # drifts. See the header of `debian-rootfs.sh`.
+          - tag: rootfs-debian-minimal
+            script: .github/debian-rootfs.sh
+            desktop: "0"
+            files: "debian-vmlinuz debian-initramfs debian.qcow2"
+          - tag: rootfs-debian-xfce
+            script: .github/debian-rootfs.sh
+            desktop: "1"
+            files: "debian-vmlinuz debian-initramfs debian.qcow2"
+          # THE FOUR BELOW ARE THE SAME SHAPE AND EVERY ONE OF THEM WAS BOOTED BEFORE IT WAS
+          # WRITTEN. They differ only in where the parts come from; see each script's header.
+          - tag: rootfs-fedora-minimal
+            script: .github/fedora-rootfs.sh
+            files: "fedora-vmlinuz fedora-initramfs fedora.qcow2"
+          - tag: rootfs-ubuntu-minimal
+            script: .github/ubuntu-rootfs.sh
+            files: "ubuntu-vmlinuz ubuntu-initramfs ubuntu.qcow2"
+          - tag: rootfs-arch-minimal
+            script: .github/arch-rootfs.sh
+            desktop: "0"
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          # THE DESKTOP VARIANTS OF THE SAME SCRIPT, ONE ROW PER SESSION.
+          #
+          # EACH WAS BOOTED LOCALLY AND SCREENSHOTTED BEFORE IT WAS ADDED HERE, because a
+          # build that succeeds says nothing about whether a compositor can drive vkms. The
+          # evidence for each is a 3146804-byte PNG of its own desktop.
+          #
+          #	sway      swaybar reading "ARCH SWAY MICROVM"
+          #	xfce      the Applications menu, clock, Home and File System icons
+          #	cinnamon  the Cinnamon panel with its "no video acceleration" notice, which is
+          #	          the CORRECT state on a microvm and not a fault
+          #	lxqt      the LXQt panel with its four workspaces
+          #	i3        the i3 first-run dialog above the i3bar
+          - tag: rootfs-arch-sway
+            script: .github/arch-rootfs.sh
+            desktop: "sway"
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          - tag: rootfs-arch-xfce
+            script: .github/arch-rootfs.sh
+            desktop: "xfce"
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          - tag: rootfs-arch-cinnamon
+            script: .github/arch-rootfs.sh
+            desktop: "cinnamon"
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          - tag: rootfs-arch-lxqt
+            script: .github/arch-rootfs.sh
+            desktop: "lxqt"
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          - tag: rootfs-arch-i3
+            script: .github/arch-rootfs.sh
+            desktop: "i3"
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          - tag: rootfs-leap-minimal
+            script: .github/leap-rootfs.sh
+            files: "leap-vmlinuz leap-initramfs leap.qcow2"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: the host tools the rootfs scripts need
+        run: |
+          set -eux
+          sudo apt-get update
+          # cpio AND zstd ARE FOR .github/make-initramfs.py, which builds the archive for the
+          # four distributions whose initramfs cannot be generated without a mounted /proc.
+          # python3 IS ALREADY ON THE RUNNER.
+          sudo apt-get install -y --no-install-recommends e2fsprogs qemu-utils cpio zstd
+
+      - name: build ${{ matrix.tag }}
+        run: |
+          set -eux
+          out=/tmp/rootfs-out
+          mkdir -p "$out"
+          # `DESKTOP` GOES THROUGH `env` RATHER THAN `sudo -E`, because `-E` only passes what
+          # sudoers allows and the runner's file is not ours to rely on. An unset value (alpine's
+          # row) reaches the script as the empty string, which alpine's script does not read.
+          sudo env DESKTOP="${{ matrix.desktop }}" sh ${{ matrix.script }} "$out"
+          sudo chown -R "$(id -u):$(id -g)" "$out"
+
+          # EVERY FILE IS ASSERTED NON-EMPTY BEFORE IT IS PUBLISHED. A build that "succeeded" with an
+          # empty disk would otherwise be downloaded by a test and fail as a boot timeout three steps
+          # away from the cause.
+          for f in ${{ matrix.files }}; do
+            test -s "$out/$f" || { echo "::error::$f is missing or empty"; exit 1; }
+            ls -l "$out/$f"
+          done
+
+      # ONE TARBALL, BECAUSE `oci-push` MIRRORS ONE FILE. The three files are always consumed together
+      # - a kernel without its initramfs does not boot - so a single artifact is also the shape that
+      # cannot be half-downloaded.
+      - name: tar the three files
+        run: |
+          set -eux
+          cd /tmp/rootfs-out
+          # `tar` FROM INSIDE the directory, so the members are bare names and a consumer's `tar xf`
+          # puts them where it expects. A leading `./` would be harmless; a leading absolute path
+          # would not.
+          tar -cf /tmp/${{ matrix.tag }}.tar ${{ matrix.files }}
+          ls -l /tmp/${{ matrix.tag }}.tar
+          tar -tf /tmp/${{ matrix.tag }}.tar
+
+      - name: push to the registry
+        # A PULL REQUEST CANNOT PUSH, and that is correct: a fork's token has no write access to this
+        # package. The build still runs there, so a broken script is caught before it merges.
+        if: github.event_name != 'pull_request'
+        uses: easydev-org/easyactions/oci-push@main
+        with:
+          path: /tmp/${{ matrix.tag }}.tar
+          tag: ${{ matrix.tag }}
+          repository: ${{ github.repository }}
+          media-type: application/vnd.easydev.rootfs
+          token: ${{ github.token }}
+          check-name: ${{ matrix.tag }}
+
+      - name: say what was published
+        if: always()
+        run: |
+          echo "### ${{ matrix.tag }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "Built, not published (a pull request has no package write access)." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Published as \`ghcr.io/${{ github.repository }}:${{ matrix.tag }}\`." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          ls -l /tmp/rootfs-out 2>/dev/null >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

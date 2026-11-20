@@ -1,0 +1,50 @@
+# AN ARCH LINUX MICROVM RUNNING SWAY ON A SOFTWARE DRM DEVICE.
+#
+# THE POINT OF THIS GUEST IS THE SCREEN. The minimal arch image proves a kernel finds a disk;
+# this one proves a Wayland compositor draws on a machine with no GPU, and that a capture
+# daemon can read those pixels back.
+#
+# HOW IT DRAWS WITHOUT HARDWARE:
+#
+#	vkms.ko       a software DRM device - it provides /dev/dri/card0 with no PCI, no
+#	              firmware and no GPU. MEASURED: sway against virtio-gpu answers
+#	              "Found 0 GPUs, cannot create backend" because the driver never binds on a
+#	              microvm, so vkms is not a convenience here, it is the only device.
+#	sway          wlroots' `drm` backend driving that device with the `pixman` renderer -
+#	              pure CPU rasterisation, no EGL on hardware.
+#	easystream    reads the compositor's frames through `wlr-screencopy`, a protocol sway
+#	              implements itself, and serves them as `est://` on 48079.
+#
+# NO XWAYLAND AND NO X SERVER. The session is pure Wayland; there is no X client in the
+# image, which is why nothing here mentions DISPLAY.
+#
+# THE ASSERTION IS TEXT THE COMPOSITOR PAINTS ITSELF. sway draws a bar whose status command
+# echoes a fixed string, so seeing it means sway started, found an output, and rendered.
+
+walkthrough "arch sway microvm - a wayland compositor on a software drm device"
+  resolution 1024x768
+  recording_resolution 1024x768
+
+  needs arch-vmlinuz arch-initramfs arch.qcow2
+  disk arch.qcow2
+
+  # `without a display` BECAUSE THERE IS NO VGA ADAPTER: `pcie=off` means no GPU and the
+  # screen is vkms, which the guest creates itself. `console=ttyS0` is where the boot log
+  # and the login prompt are read.
+  boot as a microvm from kernel "arch-vmlinuz" and initramfs "arch-initramfs" with "console=ttyS0 root=/dev/vda rw rootfstype=ext4" without a display with memory 1536, waiting up to 240s
+
+  # THE FIRST FACT: the kernel found the disk and userspace started.
+  the console will say "login"
+
+  # AND THE SESSION IS vmuser's, not root's. PipeWire refuses root outright
+  # (`ConditionUser=!root`), and the desktop depends on it.
+  the console will say "vmuser"
+
+  # THE COMPOSITOR'S OWN BAR. A sway that could not create a backend exits and restarts
+  # forever, and the bar is the first thing that proves it did not.
+  the console will say "sway"
+
+  # TWENTY SECONDS AT A DESKTOP, so the recording is a machine that stayed up.
+  wait 20s
+
+  stop the machine by killing it, waiting up to 60s

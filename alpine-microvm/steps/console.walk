@@ -1,0 +1,62 @@
+# AN ALPINE MICROVM WITH NO DESKTOP: A ROOT FILESYSTEM, A SERIAL LOGIN, NO PCIe.
+#
+# THIS IS THE FIRST OF THE THREE HEADLESS MICROVMS - Alpine, Debian, NixOS - and it is the one that
+# works without anything being arranged. Alpine's kernel is built with the option the other two
+# disagree about:
+#
+#	Alpine 3.21   CONFIG_VIRTIO_MMIO=y   CMDLINE_DEVICES=y
+#	Debian 6.12   CONFIG_VIRTIO_MMIO=m   # CMDLINE_DEVICES is not set
+#
+# so qemu's own command-line description of the MMIO disk is enough here, and the guest finds
+# /dev/vda with no help. The Debian twin of this file needs `acpi=on` for the same result; both are
+# stated on the machine type by the engine, so neither file has to know.
+#
+# TRAILING `without a display` IS NOT DECORATION. The three shapes are `with a desktop` (a
+# virtio-gpu adapter that X can draw on), `with a console` (a text-mode ISA VGA adapter), and
+# `without a display` (no adapter at all, serial only). A headless microvm that asked for a console
+# would get an adapter nothing ever writes to, and its recording would be a black field instead of a
+# stated absence.
+#
+# NOTHING HERE INSTALLS ALPINE. A microvm has no firmware to read a boot sector, so qemu is handed
+# the kernel and the initramfs directly and the disk arrives holding a system -
+# `.github/alpine-rootfs.sh` builds the three files.
+#
+# THIS FILE REPLACES A DISKLESS ONE. The earlier `verify.walk` booted Alpine's netboot kernel and
+# initramfs with the ISO attached as a second disk, and asserted `login` on the console - which it
+# reached, because Alpine's netboot guest runs entirely from tmpfs and a `modloop` squashfs. That
+# proved the vocabulary launched a guest. It did NOT prove a machine with a DISK, and the difference
+# was measured the moment a root filesystem was attached: the stock netboot initramfs carries 72
+# modules and ext4 is not one of them, so the guest answers `mount: /dev/vda: No such device` and
+# drops to an emergency shell. This one boots the disk it was given.
+
+walkthrough "alpine microvm - a root filesystem, a serial login, and no PCIe"
+  resolution 1024x768
+  # THE VIDEO IS AN ARTIFACT EVEN WHEN THE GUEST DRAWS NOTHING, so its size is stated.
+  recording_resolution 1024x768
+
+  # THE THREE FILES THE CI STEP BUILDS, named here so the boot step can refer to them.
+  needs alpine-vmlinuz alpine-initramfs alpine.qcow2
+
+  # THE ROOT FILESYSTEM, BUILT BY THE CI STEP AND NOT INSTALLED BY THIS FILE.
+  disk alpine.qcow2
+
+  # `console=ttyS0` IS THE ONLY PLACE THIS GUEST CAN BE READ, because it has no adapter. `tty0` is
+  # deliberately absent: asking the kernel to mirror to a console that does not exist is noise in
+  # the log this file asserts on.
+  boot as a microvm from kernel "alpine-vmlinuz" and initramfs "alpine-initramfs" with "console=ttyS0 root=/dev/vda rw rootfstype=ext4" without a display with memory 768, waiting up to 180s
+
+  # THE FIRST FACT: the kernel found the disk. An MMIO disk that is not claimed leaves the guest at
+  # `Begin: Running /scripts/local-block ... done.` until it gives up, so this line is the
+  # difference between a boot and a wait.
+  the console will say "vda"
+
+  # AND THE SECOND: init finished and a login is waiting. `login:` is printed by Alpine's own getty,
+  # which lives in the ROOT FILESYSTEM rather than in the initramfs - so it can only appear if
+  # /dev/vda was mounted.
+  the console will say "login"
+
+  # TWENTY SECONDS OF A GUEST AT A PROMPT, so the recording is a machine that stayed up rather than
+  # a boot log that scrolled past.
+  wait 20s
+
+  stop the machine by killing it, waiting up to 60s
