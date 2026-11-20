@@ -391,6 +391,25 @@ jobs:
           docker logs easyvm 2>&1 | tail -60 || true
           echo "--- echo ---"
           cat /tmp/echo.log 2>/dev/null | tail -20 || true
+          # AND THE GUEST'S OWN CONSOLE, which is where a machine that never reached a login writes
+          # the sentence that says why - `mount: /dev/vda: No such device`, an emergency shell, a
+          # kernel panic. The artifact below uploads it; this prints it in the step's own log so it
+          # is readable without downloading anything.
+          echo "--- console ---"
+          docker cp easyvm:/work/console.log /tmp/console-alpine.log 2>/dev/null || true
+          tail -40 /tmp/console-alpine.log 2>/dev/null || echo "(no console)"
+
+      # THE CONSOLE IS THE ONLY PLACE A GUEST THAT DID NOT REACH A LOGIN SAYS WHY, and it lives
+      # inside the container. Uploaded on success too: a machine that came up is worth the same
+      # evidence as one that did not, and a step that runs only on failure is a step nobody has
+      # tested on the path that matters.
+      - name: the guest's console, always
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpine-console
+          path: /tmp/console-alpine.log
+          if-no-files-found: ignore
 
       - name: clean up
         if: always()
