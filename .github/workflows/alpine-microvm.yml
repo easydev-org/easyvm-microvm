@@ -5,7 +5,7 @@ name: alpine-microvm
 # ---------------------------------------------------------------------------------------------------
 # WHY THIS WORKFLOW EXISTS AT ALL
 #
-# `linux/alpine-microvm/steps/console.walk` has been in the tree since the microvm work started and
+# `alpine-microvm/steps/console.walk` has been in the tree since the microvm work started and
 # NOTHING HAS EVER RUN IT IN CI. Measured: `grep -rl alpine-microvm .github/workflows/` returned
 # nothing. So the first of the three headless microvms - the one the other two were modelled on - was
 # verified by hand and never again.
@@ -51,34 +51,33 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-      # TWO REPOSITORIES, AND THE ORDER IS THE POINT.
+      # THE ENGINE, AT THE WORKSPACE ROOT, BECAUSE THIS JOB BUILDS THE DAEMON FROM SOURCE.
       #
-      # THIS WORKFLOW BUILDS THE DAEMON FROM SOURCE - `go build ./cmd/easyvm` and
-      # `docker build -f Containerfile --target tester` - so it needs the ENGINE, which lives in
-      # easydev-org/easyvm and is not in this repository. The walkthroughs are here.
+      # `go build ./cmd/easyvm` and `docker build -f Containerfile` need the engine's tree, and
+      # `actions/checkout` checks out only the repository that OWNS the workflow. So the engine is
+      # fetched first and this repository is laid over it by `tar` BELOW.
       #
-      # SO THE ENGINE IS CHECKED OUT FIRST, at the workspace root, and this repository is laid over
-      # it. That is what the pre-split layout was: one tree holding both. `path: .` on the second
-      # checkout MERGES rather than nesting, so `cmd/easyvm` and `alpine-microvm/` end up side by
-      # side exactly as they were.
+      # A SECOND `actions/checkout` WAS TRIED AND DOES NOT WORK HERE. With `path: .` it writes to the
+      # workspace root, and even with `clean: false` the action removes what a previous checkout put
+      # there; measured twice, both times as
       #
-      # THE ALTERNATIVE WAS TO PULL THE PUBLISHED IMAGE and run the daemon out of it, which is what
-      # the other repositories' stages do. It is not what THIS workflow is for: it builds the tester
-      # image and the socks5 echo from source, and a test of the engine that ran a released binary
-      # would not be testing the commit it was triggered by.
+      #	##[error]The specified go version file at: go.mod does not exist
+      #
+      # - a message that names the missing file rather than the step that deleted it.
       - uses: actions/checkout@v4
         with:
           repository: easydev-org/easyvm
           ref: main
 
-      # `clean: false` IS THE WHOLE TRICK. A second checkout defaults to CLEANING the workspace,
-      # which would delete the engine just fetched - the run then fails at `setup-go` with "go.mod
-      # does not exist", a message that names the file rather than the checkout that removed it.
-      # MEASURED on this workflow's first run after the split.
-      - uses: actions/checkout@v4
-        with:
-          path: .
-          clean: false
+      - name: lay this repository over the engine
+        run: |
+          set -eux
+          # THE WALKTHROUGHS AND THE ROOTFS SCRIPTS, AND NOTHING ELSE. `shapes/` comes too: it is
+          # what a repository declares about the machines it starts.
+          for d in */ .github/ shapes/; do
+            if [ -e "$d" ]; then cp -a "$d" "$GITHUB_WORKSPACE/"; fi
+          done
+          ls -d cmd internal Containerfile go.mod
 
       # AND THE TWO DIRECTORIES THE ENGINE'S OWN CONTAINERFILE AND THE ECHO NEED ARE HERE NOW, so
       # nothing below changes: `./cmd/easyvm`, `Containerfile` and `ci/` all resolve as they did when
@@ -280,7 +279,7 @@ jobs:
       - name: boot the alpine microvm, and leave it up
         run: |
           set -eux
-          docker cp linux/alpine-microvm/steps/console.walk easyvm:/work/console.walk
+          docker cp alpine-microvm/steps/console.walk easyvm:/work/console.walk
           docker exec easyvm /usr/local/bin/easyvm create /work/console.walk --work /work
           docker exec easyvm /usr/local/bin/easyvm status --work /work | tail -5
 

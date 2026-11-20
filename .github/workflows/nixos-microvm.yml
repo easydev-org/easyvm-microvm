@@ -115,84 +115,33 @@ jobs:
       options: --shm-size=2g
 
     steps:
-      - name: build an FHS shim so the actions can run
-        # FIRST, BEFORE `actions/checkout`, BECAUSE CHECKOUT IS A NODE ACTION AND NODE CANNOT START.
-        #
-        # THE SHIM ONLY CREATES SYMLINKS. Nothing is copied into /nix/store, nothing is installed, and
-        # the build itself still runs against a normal, hermetic store - the shim exists so the
-        # RUNNER'S tooling can execute, and is never referenced by the flake. That distinction is
-        # what keeps it from polluting the artifact.
-        run: |
-          set -eu
-          # FIND THE LOADER, NOT A PACKAGE NAME.
-          #
-          # A GLOB ON `*-glibc-[0-9]*` IS NOT ENOUGH AND WAS MEASURED WRONG: it also matches
-          # `...-getconf-glibc-2.44-57.drv`, a DERIVATION FILE rather than an output, and
-          # `sort -V | tail -1` picks it because `g` sorts above `2`. The step then fails on a
-          # missing ld-linux inside a path that never had one. So the search is for the directory
-          # that actually holds the dynamic loader.
-          GLIBC=$(dirname "$(dirname "$(ls /nix/store/*-glibc-[0-9]*/lib/ld-linux-x86-64.so.2 2>/dev/null | sort -V | tail -1)")")
-          GCCLIB=$(dirname "$(ls /nix/store/*-gcc-*-lib/lib/libstdc++.so.6 2>/dev/null | sort -V | tail -1)")
-          echo "glibc:     $GLIBC"
-          echo "libstdc++: $GCCLIB"
-          [ -n "$GLIBC" ] || { echo "::error::no glibc with a dynamic loader in /nix/store"; exit 1; }
-          [ -n "$GCCLIB" ] || { echo "::error::no libstdc++ in /nix/store"; exit 1; }
-
-          # TWO PATHS, TWO MECHANISMS, AND THE DIFFERENCE MATTERS.
-          #
-          # 1. THE INTERPRETER. An ELF binary names its loader by absolute path and the kernel looks
-          #    there and nowhere else. node asks for /lib64/ld-linux-x86-64.so.2, so that exact path
-          #    must exist. No environment variable can substitute for this.
-          mkdir -p /lib64
-          ln -sf "$GLIBC/lib/ld-linux-x86-64.so.2" /lib64/ld-linux-x86-64.so.2
-
-          # 2. THE C++ RUNTIME. Deliberately NOT in /usr/lib and deliberately WITHOUT libc: this
-          #    directory is LD_LIBRARY_PATH, and putting a libc in it breaks nix. node needs
-          #    libstdc++ and libgcc_s; nix loads neither.
-          mkdir -p /opt/actions-libs
-          ln -sf "$GCCLIB/libstdc++.so.6" /opt/actions-libs/libstdc++.so.6
-          ln -sf "$GCCLIB/libgcc_s.so.1" /opt/actions-libs/libgcc_s.so.1
-
-          ls -l /lib64 /opt/actions-libs
-
-      - name: prove the shim works, and that git is already here
-        # THE SHIM IS THE ONLY REASON THE REST OF THIS FILE CAN RUN, so it is tested rather than
-        # assumed.
-        #
-        # GIT NEEDS NO INSTALL STEP. The image ships `git-minimal` (measured 2.54.0), which is why
-        # there is no `nix profile install nixpkgs#git` here: adding the full `git` package beside it
-        # collides on share/git/contrib and `nix profile` refuses with a file-conflict error.
-        run: |
-          set -eu
-          git --version
-          nix --version
-          # BOTH HALVES OF THE SHIM, PLUS THE ONE THING THAT MUST NOT REGRESS.
-          test -e /lib64/ld-linux-x86-64.so.2
-          test -e /opt/actions-libs/libstdc++.so.6
-          test -e /opt/actions-libs/libgcc_s.so.1
-          # NIX MUST STILL WORK WITH LD_LIBRARY_PATH SET. If a libc ever ends up in that directory,
-          # this line fails here, with the symbol error, instead of halfway through the build.
-          nix --version
-
-      # TWO REPOSITORIES, BECAUSE THIS JOB BUILDS THE DAEMON FROM SOURCE.
+      # THE ENGINE, AT THE WORKSPACE ROOT, BECAUSE THIS JOB BUILDS THE DAEMON FROM SOURCE.
       #
-      # `go build ./cmd/easyvm` and `docker build -f Containerfile` need the ENGINE, which lives in
-      # easydev-org/easyvm. The walkthroughs are in this repository. Checking the engine out first at
-      # the workspace root and this repository over it reproduces the pre-split layout exactly:
-      # `cmd/easyvm` and `<distro>-microvm/` end up side by side.
+      # `go build ./cmd/easyvm` and `docker build -f Containerfile` need the engine's tree, and
+      # `actions/checkout` checks out only the repository that OWNS the workflow. So the engine is
+      # fetched first and this repository is laid over it by `tar` BELOW.
+      #
+      # A SECOND `actions/checkout` WAS TRIED AND DOES NOT WORK HERE. With `path: .` it writes to the
+      # workspace root, and even with `clean: false` the action removes what a previous checkout put
+      # there; measured twice, both times as
+      #
+      #	##[error]The specified go version file at: go.mod does not exist
+      #
+      # - a message that names the missing file rather than the step that deleted it.
       - uses: actions/checkout@v4
         with:
           repository: easydev-org/easyvm
           ref: main
 
-      # `clean: false` IS THE WHOLE TRICK. A second checkout defaults to CLEANING the workspace,
-      # which would delete the engine just fetched - the run then fails at `setup-go` with "go.mod
-      # does not exist", a message that names the file rather than the checkout that removed it.
-      # MEASURED on this workflow's first run after the split.
-      - uses: actions/checkout@v4
-        with:
-          path: .
-          clean: false
+      - name: lay this repository over the engine
+        run: |
+          set -eux
+          # THE WALKTHROUGHS AND THE ROOTFS SCRIPTS, AND NOTHING ELSE. `shapes/` comes too: it is
+          # what a repository declares about the machines it starts.
+          for d in */ .github/ shapes/; do
+            if [ -e "$d" ]; then cp -a "$d" "$GITHUB_WORKSPACE/"; fi
+          done
+          ls -d cmd internal Containerfile go.mod
         with:
           # THE CONTAINER RUNS AS ROOT and the mounted workspace is owned by the runner's uid, so git
           # refuses to read it: "detected dubious ownership in repository".

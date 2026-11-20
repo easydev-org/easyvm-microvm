@@ -108,78 +108,86 @@ jobs:
       matrix:
         include:
           - tag: rootfs-alpine-minimal
-            walk: linux/alpine-microvm/steps/console.walk
+            walk: alpine-microvm/steps/console.walk
             # THE THREE MEMBERS THE TARBALL CARRIES, named here because `needs:` in the walkthrough
             # asks for them by name and a rename in either place would otherwise fail at step 1 with
             # a message about a missing medium.
             files: "alpine-vmlinuz alpine-initramfs alpine.qcow2"
           - tag: rootfs-debian-minimal
-            walk: linux/debian-microvm/steps/console.walk
+            walk: debian-microvm/steps/console.walk
             files: "debian-vmlinuz debian-initramfs debian.qcow2"
           - tag: rootfs-debian-xfce
-            walk: linux/debian-microvm/steps/xfce.walk
+            walk: debian-microvm/steps/xfce.walk
             files: "debian-vmlinuz debian-initramfs debian.qcow2"
           # THE NIXOS TARBALL USES DIFFERENT MEMBER NAMES - `nixos-kernel` rather than
           # `nixos-vmlinuz` - because that is what its workflow publishes. The walkthrough's `needs:`
           # names them, so the two must agree.
           - tag: rootfs-nixos-minimal
-            walk: linux/nixos-microvm/steps/console.walk
+            walk: nixos-microvm/steps/console.walk
             files: "nixos-kernel nixos-initrd nixos-rootfs.qcow2"
           # THE FOUR THAT WERE MEASURED BEFORE THIS WORKFLOW NAMED THEM. Each was booted by hand
           # against the same machine type the daemon uses, and the numbers are in each script's
           # header. They are here so a regression is caught by CI rather than by the next person
           # who tries to use one.
           - tag: rootfs-fedora-minimal
-            walk: linux/fedora-microvm/steps/console.walk
+            walk: fedora-microvm/steps/console.walk
             files: "fedora-vmlinuz fedora-initramfs fedora.qcow2"
           - tag: rootfs-ubuntu-minimal
-            walk: linux/ubuntu-microvm/steps/console.walk
+            walk: ubuntu-microvm/steps/console.walk
             files: "ubuntu-vmlinuz ubuntu-initramfs ubuntu.qcow2"
           - tag: rootfs-arch-minimal
-            walk: linux/arch-microvm/steps/console.walk
+            walk: arch-microvm/steps/console.walk
             files: "arch-vmlinuz arch-initramfs arch.qcow2"
           # THE DESKTOP VARIANT, WITH ITS OWN WALKTHROUGH. It asserts on the compositor's bar
           # rather than a login prompt, because a sway that cannot create a backend still
           # reaches a prompt - it just never draws.
           - tag: rootfs-arch-sway
-            walk: linux/arch-sway-microvm/steps/desktop.walk
+            walk: arch-sway-microvm/steps/desktop.walk
             files: "arch-vmlinuz arch-initramfs arch.qcow2"
           - tag: rootfs-arch-xfce
-            walk: linux/arch-xfce-microvm/steps/desktop.walk
+            walk: arch-xfce-microvm/steps/desktop.walk
             files: "arch-vmlinuz arch-initramfs arch.qcow2"
           - tag: rootfs-arch-cinnamon
-            walk: linux/arch-cinnamon-microvm/steps/desktop.walk
+            walk: arch-cinnamon-microvm/steps/desktop.walk
             files: "arch-vmlinuz arch-initramfs arch.qcow2"
           - tag: rootfs-arch-lxqt
-            walk: linux/arch-lxqt-microvm/steps/desktop.walk
+            walk: arch-lxqt-microvm/steps/desktop.walk
             files: "arch-vmlinuz arch-initramfs arch.qcow2"
           - tag: rootfs-arch-i3
-            walk: linux/arch-i3-microvm/steps/desktop.walk
+            walk: arch-i3-microvm/steps/desktop.walk
             files: "arch-vmlinuz arch-initramfs arch.qcow2"
           - tag: rootfs-leap-minimal
-            walk: linux/leap-microvm/steps/console.walk
+            walk: leap-microvm/steps/console.walk
             files: "leap-vmlinuz leap-initramfs leap.qcow2"
 
     steps:
-      # TWO REPOSITORIES, BECAUSE THIS JOB BUILDS THE DAEMON FROM SOURCE.
+      # THE ENGINE, AT THE WORKSPACE ROOT, BECAUSE THIS JOB BUILDS THE DAEMON FROM SOURCE.
       #
-      # `go build ./cmd/easyvm` and `docker build -f Containerfile` need the ENGINE, which lives in
-      # easydev-org/easyvm. The walkthroughs are in this repository. Checking the engine out first at
-      # the workspace root and this repository over it reproduces the pre-split layout exactly:
-      # `cmd/easyvm` and `<distro>-microvm/` end up side by side.
+      # `go build ./cmd/easyvm` and `docker build -f Containerfile` need the engine's tree, and
+      # `actions/checkout` checks out only the repository that OWNS the workflow. So the engine is
+      # fetched first and this repository is laid over it by `tar` BELOW.
+      #
+      # A SECOND `actions/checkout` WAS TRIED AND DOES NOT WORK HERE. With `path: .` it writes to the
+      # workspace root, and even with `clean: false` the action removes what a previous checkout put
+      # there; measured twice, both times as
+      #
+      #	##[error]The specified go version file at: go.mod does not exist
+      #
+      # - a message that names the missing file rather than the step that deleted it.
       - uses: actions/checkout@v4
         with:
           repository: easydev-org/easyvm
           ref: main
 
-      # `clean: false` IS THE WHOLE TRICK. A second checkout defaults to CLEANING the workspace,
-      # which would delete the engine just fetched - the run then fails at `setup-go` with "go.mod
-      # does not exist", a message that names the file rather than the checkout that removed it.
-      # MEASURED on this workflow's first run after the split.
-      - uses: actions/checkout@v4
-        with:
-          path: .
-          clean: false
+      - name: lay this repository over the engine
+        run: |
+          set -eux
+          # THE WALKTHROUGHS AND THE ROOTFS SCRIPTS, AND NOTHING ELSE. `shapes/` comes too: it is
+          # what a repository declares about the machines it starts.
+          for d in */ .github/ shapes/; do
+            if [ -e "$d" ]; then cp -a "$d" "$GITHUB_WORKSPACE/"; fi
+          done
+          ls -d cmd internal Containerfile go.mod
 
       # THE PUBLISHED ARTIFACT, NOT A LOCAL BUILD. A boot test of a locally built image would prove
       # the script works and say nothing about the bytes a consumer actually downloads - and the
