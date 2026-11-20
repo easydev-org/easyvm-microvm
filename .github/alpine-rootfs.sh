@@ -127,13 +127,41 @@ as_root tee "$ROOT/etc/inittab" >/dev/null <<'EOF'
 ::wait:/sbin/openrc default
 ::ctrlaltdel:/sbin/reboot
 ::shutdown:/bin/umount -a -r
-# `-a vmuser` IS BUSYBOX GETTY'S AUTOLOGIN, the OpenRC equivalent of the systemd images'
-# `agetty --autologin`. THE SESSION BELONGS TO vmuser BECAUSE THE DESKTOP DOES: PipeWire
-# refuses root (`ConditionUser=!root`), so a root console cannot start a Wayland session.
-# root keeps PID 1 and the services; the console is a user's.
-tty1::respawn:/sbin/getty -L -a vmuser tty1 38400 vt100
-ttyS0::respawn:/sbin/getty -L -a vmuser ttyS0 115200 vt100
+# `-n -l /sbin/autologin` IS BUSYBOX GETTY'S AUTOLOGIN, AND `-a` IS NOT.
+#
+# MEASURED ON THE FIRST CI RUN OF THIS ROOTFS, and it is why the guest never reached a login:
+#
+#	/sbin/getty: unrecognized option: a
+#	Usage: getty [OPTIONS] BAUD_RATE[,BAUD_RATE]... TTY [TERMTYPE]
+#
+# `-a` IS `agetty`'s, from util-linux. Alpine's `/sbin/getty` is BUSYBOX, whose options are
+#
+#	-n	Don't prompt for login name
+#	-l LOGIN	Invoke LOGIN instead of /bin/login
+#
+# - and BusyBox does NOT ship `/sbin/autologin` either, so this image writes one below. The visible
+# symptom was not "autologin failed": getty printed ITS USAGE and exited, `respawn` restarted it, and
+# the console filled with that block every few seconds. The walkthrough asserts `login:` and there was
+# never going to be one.
+#
+# THE SESSION BELONGS TO vmuser BECAUSE THE DESKTOP DOES: PipeWire refuses root
+# (`ConditionUser=!root`), so a root console cannot start a Wayland session. root keeps PID 1 and the
+# services; the console is a user's.
+tty1::respawn:/sbin/getty -L -n -l /sbin/autologin tty1 38400 vt100
+ttyS0::respawn:/sbin/getty -L -n -l /sbin/autologin ttyS0 115200 vt100
 EOF
+
+# AND THE PROGRAM BUSYBOX GETTY INVOKES INSTEAD OF /bin/login. Four lines, in the guest's own shell,
+# because the alternative is depending on util-linux for one flag.
+log "writing /sbin/autologin"
+as_root tee "$ROOT/sbin/autologin" >/dev/null <<'EOF'
+#!/bin/sh
+# BUSYBOX GETTY RUNS THIS INSTEAD OF /bin/login WHEN THE inittab SAYS `-l /sbin/autologin`.
+# `exec` SO THIS PROCESS IS THE SHELL rather than its parent: getty respawns what it started, and a
+# wrapper left around a finished shell would respawn nothing.
+exec /bin/su - vmuser
+EOF
+as_root chmod 0755 "$ROOT/sbin/autologin"
 
 # --- 4b. THE RESOLVER, WHICH WAS THE CONTAINER'S AND NOT THE GUEST'S -----------------------
 #
