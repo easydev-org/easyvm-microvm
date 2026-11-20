@@ -50,10 +50,28 @@ walkthrough "alpine microvm - a root filesystem, a serial login, and no PCIe"
   # difference between a boot and a wait.
   the console will say "vda"
 
-  # AND THE SECOND: init finished and a login is waiting. `login:` is printed by Alpine's own getty,
-  # which lives in the ROOT FILESYSTEM rather than in the initramfs - so it can only appear if
-  # /dev/vda was mounted.
-  the console will say "login"
+  # AND THE SECOND: userspace finished and A SHELL IS WAITING, WHICH IS NOT THE SAME AS `login:`.
+  #
+  # THE ROOT FILESYSTEM AUTOLOGS vmuser. `inittab` runs
+  #
+  #	ttyS0::respawn:/sbin/getty -L -n -l /sbin/autologin ttyS0 115200 vt100
+  #
+  # so there is never a `login:` prompt to wait for: the program getty starts is `/sbin/autologin`,
+  # which execs `su - vmuser` and prints the user's own prompt. MEASURED on the console:
+  #
+  #	udhcpc: lease of 172.30.0.2 obtained from 172.30.0.1
+  #	 * Starting sshd ... [ ok ]
+  #	 * Starting local ... [ ok ]
+  #	localhost:~$
+  #
+  # AND THE AUTOLOGIN IS NOT A CONVENIENCE. PipeWire refuses root (`ConditionUser=!root`), so a guest
+  # whose console is root cannot start a Wayland session - which is what the arch microvm desktops
+  # need. The console belongs to vmuser for the same reason the desktop does.
+  #
+  # THIS FILE ASSERTED `login` UNTIL A CI RUN SHOWED THE PROMPT WAS `localhost:~$` - the assertion was
+  # written against a getty that never worked (its `-a` flag is util-linux's, not busybox's), so the
+  # sentence about `login:` described a screen that could not exist.
+  the console will say "localhost:~$"
 
   # TWENTY SECONDS OF A GUEST AT A PROMPT, so the recording is a machine that stayed up rather than
   # a boot log that scrolled past.
