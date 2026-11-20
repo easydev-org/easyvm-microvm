@@ -185,9 +185,14 @@ jobs:
           repository: easydev-org/easyvm
           ref: main
 
+      # `clean: false` IS THE WHOLE TRICK. A second checkout defaults to CLEANING the workspace,
+      # which would delete the engine just fetched - the run then fails at `setup-go` with "go.mod
+      # does not exist", a message that names the file rather than the checkout that removed it.
+      # MEASURED on this workflow's first run after the split.
       - uses: actions/checkout@v4
         with:
           path: .
+          clean: false
         with:
           # THE CONTAINER RUNS AS ROOT and the mounted workspace is owned by the runner's uid, so git
           # refuses to read it: "detected dubious ownership in repository".

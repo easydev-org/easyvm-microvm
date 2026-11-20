@@ -172,9 +172,14 @@ jobs:
           repository: easydev-org/easyvm
           ref: main
 
+      # `clean: false` IS THE WHOLE TRICK. A second checkout defaults to CLEANING the workspace,
+      # which would delete the engine just fetched - the run then fails at `setup-go` with "go.mod
+      # does not exist", a message that names the file rather than the checkout that removed it.
+      # MEASURED on this workflow's first run after the split.
       - uses: actions/checkout@v4
         with:
           path: .
+          clean: false
 
       # THE PUBLISHED ARTIFACT, NOT A LOCAL BUILD. A boot test of a locally built image would prove
       # the script works and say nothing about the bytes a consumer actually downloads - and the

@@ -71,9 +71,14 @@ jobs:
           repository: easydev-org/easyvm
           ref: main
 
+      # `clean: false` IS THE WHOLE TRICK. A second checkout defaults to CLEANING the workspace,
+      # which would delete the engine just fetched - the run then fails at `setup-go` with "go.mod
+      # does not exist", a message that names the file rather than the checkout that removed it.
+      # MEASURED on this workflow's first run after the split.
       - uses: actions/checkout@v4
         with:
           path: .
+          clean: false
 
       # AND THE TWO DIRECTORIES THE ENGINE'S OWN CONTAINERFILE AND THE ECHO NEED ARE HERE NOW, so
       # nothing below changes: `./cmd/easyvm`, `Containerfile` and `ci/` all resolve as they did when
