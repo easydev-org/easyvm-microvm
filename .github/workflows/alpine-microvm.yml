@@ -51,7 +51,33 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
+      # TWO REPOSITORIES, AND THE ORDER IS THE POINT.
+      #
+      # THIS WORKFLOW BUILDS THE DAEMON FROM SOURCE - `go build ./cmd/easyvm` and
+      # `docker build -f Containerfile --target tester` - so it needs the ENGINE, which lives in
+      # easydev-org/easyvm and is not in this repository. The walkthroughs are here.
+      #
+      # SO THE ENGINE IS CHECKED OUT FIRST, at the workspace root, and this repository is laid over
+      # it. That is what the pre-split layout was: one tree holding both. `path: .` on the second
+      # checkout MERGES rather than nesting, so `cmd/easyvm` and `alpine-microvm/` end up side by
+      # side exactly as they were.
+      #
+      # THE ALTERNATIVE WAS TO PULL THE PUBLISHED IMAGE and run the daemon out of it, which is what
+      # the other repositories' stages do. It is not what THIS workflow is for: it builds the tester
+      # image and the socks5 echo from source, and a test of the engine that ran a released binary
+      # would not be testing the commit it was triggered by.
       - uses: actions/checkout@v4
+        with:
+          repository: easydev-org/easyvm
+          ref: main
+
+      - uses: actions/checkout@v4
+        with:
+          path: .
+
+      # AND THE TWO DIRECTORIES THE ENGINE'S OWN CONTAINERFILE AND THE ECHO NEED ARE HERE NOW, so
+      # nothing below changes: `./cmd/easyvm`, `Containerfile` and `ci/` all resolve as they did when
+      # this was one repository.
 
       # THE ROOT FILESYSTEM IS DOWNLOADED, NOT BUILT.
       #

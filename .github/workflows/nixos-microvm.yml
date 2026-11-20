@@ -174,7 +174,20 @@ jobs:
           # this line fails here, with the symbol error, instead of halfway through the build.
           nix --version
 
+      # TWO REPOSITORIES, BECAUSE THIS JOB BUILDS THE DAEMON FROM SOURCE.
+      #
+      # `go build ./cmd/easyvm` and `docker build -f Containerfile` need the ENGINE, which lives in
+      # easydev-org/easyvm. The walkthroughs are in this repository. Checking the engine out first at
+      # the workspace root and this repository over it reproduces the pre-split layout exactly:
+      # `cmd/easyvm` and `<distro>-microvm/` end up side by side.
       - uses: actions/checkout@v4
+        with:
+          repository: easydev-org/easyvm
+          ref: main
+
+      - uses: actions/checkout@v4
+        with:
+          path: .
         with:
           # THE CONTAINER RUNS AS ROOT and the mounted workspace is owned by the runner's uid, so git
           # refuses to read it: "detected dubious ownership in repository".

@@ -161,7 +161,20 @@ jobs:
             files: "leap-vmlinuz leap-initramfs leap.qcow2"
 
     steps:
+      # TWO REPOSITORIES, BECAUSE THIS JOB BUILDS THE DAEMON FROM SOURCE.
+      #
+      # `go build ./cmd/easyvm` and `docker build -f Containerfile` need the ENGINE, which lives in
+      # easydev-org/easyvm. The walkthroughs are in this repository. Checking the engine out first at
+      # the workspace root and this repository over it reproduces the pre-split layout exactly:
+      # `cmd/easyvm` and `<distro>-microvm/` end up side by side.
       - uses: actions/checkout@v4
+        with:
+          repository: easydev-org/easyvm
+          ref: main
+
+      - uses: actions/checkout@v4
+        with:
+          path: .
 
       # THE PUBLISHED ARTIFACT, NOT A LOCAL BUILD. A boot test of a locally built image would prove
       # the script works and say nothing about the bytes a consumer actually downloads - and the
