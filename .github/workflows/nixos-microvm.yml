@@ -128,6 +128,16 @@ jobs:
         with:
           repository: easydev-org/easyvm
           ref: main
+          # THE CONTAINER RUNS AS ROOT and the mounted workspace is owned by the runner's uid, so git
+          # refuses to read it: "detected dubious ownership in repository".
+          #
+          # IT WAS UNDER THE NEXT STEP, under a `run:`, where a `with:` is not a key this runner
+          # accepts - so the workflow did not parse at all:
+          #
+          #	failed to parse workflow: (Line: 156, Col: 9): Unexpected value 'with'
+          #
+          # which means the one workflow that publishes the NixOS microvm had never been dispatchable.
+          set-safe-directory: true
 
       # AND THIS REPOSITORY IS ALREADY ON DISK, because the workflow that is running belongs to it.
       # `actions/checkout` fetched it into `$GITHUB_WORKSPACE` before any of this, which the engine
@@ -153,10 +163,6 @@ jobs:
           done
           ls -d cmd internal Containerfile go.mod
           ls -d */ | head -20
-        with:
-          # THE CONTAINER RUNS AS ROOT and the mounted workspace is owned by the runner's uid, so git
-          # refuses to read it: "detected dubious ownership in repository".
-          set-safe-directory: true
 
       - name: configure nix once
         # EVERY SETTING THAT EVERY LATER `nix` COMMAND NEEDS, WRITTEN ONCE.
