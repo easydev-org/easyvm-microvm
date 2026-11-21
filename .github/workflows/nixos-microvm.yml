@@ -243,6 +243,23 @@ jobs:
           EOF
           nix config show sandbox
 
+      - name: make the laid-over files visible to git
+        # NIX REFUSES TO READ AN UNTRACKED PATH, AND REFUSES THE WHOLE FLAKE WHEN IT FINDS ONE:
+        #
+        #	error: Path 'nixos-microvm/flake.nix' in the repository
+        #	       "/__w/easyvm-microvm/easyvm-microvm" is not tracked by Git.
+        #
+        # MEASURED ON RUN 44925678836. The engine was checked out into the workspace and THIS
+        # repository was then copied over it - so there is a .git from the engine and a `flake.nix`
+        # that the engine's history has never heard of. `git add -N` is what the message itself asks
+        # for: it records the path without staging its contents, so the flake is visible to Nix and
+        # nothing is committed.
+        run: |
+          set -eu
+          cd "$GITHUB_WORKSPACE"
+          git add -N shapes nixos-microvm 2>/dev/null || git add -N .
+          git status --short | head -20
+
       - name: build the four files
         run: |
           set -eu
