@@ -115,6 +115,66 @@ jobs:
       options: --shm-size=2g
 
     steps:
+      # THE SHIM COMES FIRST, BECAUSE `actions/checkout` IS ITSELF A NODE ACTION. See the header:
+      # this image has no /lib64 and no /usr/lib, so any ordinary glibc binary dies with
+      #
+      #	exec /__e/node24/bin/node: no such file or directory
+      #
+      # MEASURED ON RUN 44924983891: the file parsed, the job started, and the FIRST step -
+      # `actions/checkout` - failed with exactly that, so the NixOS microvm could not be built at all.
+      # The header described this shim from the beginning; the step that builds it was the one thing
+      # missing from the split.
+      #
+      # THE SHIM ONLY CREATES SYMLINKS. Nothing is copied into /nix/store, nothing is installed, and
+      # the build itself still runs against a normal, hermetic Nix store - the shim exists so that the
+      # *runner's* tooling can execute, and is never referenced by the flake. That distinction is what
+      # keeps this from polluting the artifact.
+      #
+      # THE PATHS ARE DISCOVERED, NOT HARDCODED, because the image's glibc version moves.
+      - name: build an FHS shim so the actions can run
+        run: |
+          set -eu
+          # FIND THE LOADER, NOT A PACKAGE NAME.
+          #
+          # A GLOB ON `*-glibc-[0-9]*` IS NOT ENOUGH AND WAS MEASURED WRONG: it matches
+          # `...-getconf-glibc-2.44-57.drv` - a DERIVATION FILE, not an output - and `sort -V | tail
+          # -1` picks it because `g` sorts above `2`. What is wanted is the one directory that
+          # actually holds the dynamic loader, so that is what is searched for.
+          GLIBC=$(dirname "$(dirname "$(ls /nix/store/*-glibc-[0-9]*/lib/ld-linux-x86-64.so.2 2>/dev/null | sort -V | tail -1)")")
+          GCCLIB=$(dirname "$(ls /nix/store/*-gcc-*-lib/lib/libstdc++.so.6 2>/dev/null | sort -V | tail -1)")
+          echo "glibc:    $GLIBC"
+          echo "libstdc++: $GCCLIB"
+          [ -n "$GLIBC" ] || { echo "::error::no glibc with a dynamic loader in /nix/store"; exit 1; }
+          [ -n "$GCCLIB" ] || { echo "::error::no libstdc++ in /nix/store"; exit 1; }
+          # 1. THE INTERPRETER: an ELF binary names its loader by absolute path, so that exact path
+          #    must exist. No environment variable can substitute for this.
+          mkdir -p /lib64
+          ln -sf "$GLIBC/lib/ld-linux-x86-64.so.2" /lib64/ld-linux-x86-64.so.2
+          # 2. THE C++ RUNTIME: deliberately NOT in /usr/lib and deliberately WITHOUT libc, because
+          #    this directory is LD_LIBRARY_PATH and a libc in it breaks nix.
+          mkdir -p /opt/actions-libs
+          ln -sf "$GCCLIB/libstdc++.so.6" /opt/actions-libs/libstdc++.so.6
+          ln -sf "$GCCLIB/libgcc_s.so.1" /opt/actions-libs/libgcc_s.so.1
+          ls -l /lib64 /opt/actions-libs
+
+      - name: prove the shim works, and that git is already here
+        # THE SHIM IS THE ONLY REASON THE REST OF THIS FILE CAN RUN, so it is tested rather than
+        # assumed. GIT NEEDS NO INSTALL STEP: the image ships `git-minimal`, and adding the full `git`
+        # package beside it collides on share/git/contrib and `nix profile` refuses.
+        run: |
+          set -eu
+          git --version
+          nix --version
+          test -e /lib64/ld-linux-x86-64.so.2
+          test -e /opt/actions-libs/libstdc++.so.6
+          test -e /opt/actions-libs/libgcc_s.so.1
+          # NIX MUST STILL WORK WITH LD_LIBRARY_PATH SET. If a libc ever ends up in that directory
+          # this line fails here, with the symbol error, instead of halfway through the build.
+          nix --version
+          if [ -d /nix/store ] && ls /nix/store/*-nodejs-*/bin/node >/dev/null 2>&1; then
+            node --version
+          fi
+
       # THE ENGINE, AT THE WORKSPACE ROOT, BECAUSE THIS JOB BUILDS THE DAEMON FROM SOURCE.
       #
       # `go build ./cmd/easyvm` and `docker build -f Containerfile` need the engine's tree, and
