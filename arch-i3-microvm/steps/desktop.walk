@@ -32,9 +32,21 @@ walkthrough "i3 microvm - i3 on xvfb, captured over xshm"
   # desktop here goes through it for audio.
   the console will say "vmuser"
 
-  # THE SESSION MANAGER ITSELF. A desktop that could not start leaves the console quiet;
-  # this line is the manager's own name, printed once it is running.
-  the console will say "i3-wm"
+  # THE BAR, WHICH ONLY RUNS INSIDE i3.
+  #
+  # MEASURED ON RUN 44925759474: the console's last lines were
+  #
+  #	desktop.sh[285]: i3status: trying to auto-detect output_format setting
+  #	desktop.sh[285]: i3status: auto-detected "i3bar"
+  #
+  # WHICH IS i3 WORKING. The old assertion asked for the literal "i3-wm" - that is a PACKAGE NAME,
+  # not something the window manager prints, so the check could not pass on a machine that was
+  # drawing perfectly, and this variant spent its three minutes failing on a healthy desktop.
+  #
+  # i3status is i3's own bar process: it is started by i3's config, it writes this line while it
+  # decides what to draw, and it says "i3bar" only when it has a bar to draw into.
+  the console will say "i3status"
+  the console will say "i3bar"
 
   wait 20s
 

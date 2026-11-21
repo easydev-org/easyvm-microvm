@@ -34,7 +34,20 @@ walkthrough "lxqt microvm - LXQt on xvfb, captured over xshm"
 
   # THE SESSION MANAGER ITSELF. A desktop that could not start leaves the console quiet;
   # this line is the manager's own name, printed once it is running.
-  the console will say "startlxqt"
+  # THE SESSION UNIT'S OWN LINE, BECAUSE THE SESSION ITSELF IS SILENT.
+  #
+  # MEASURED ON RUN 44925759474, whose console ended with
+  #
+  #	OK  Started the session: Xvfb or a Wayland compositor, for vmuser.
+  #	OK  Started the desktop session on Xvfb :0.
+  #	archlinux login: vmuser (automatic login)
+  #
+  # and NOT ONE LINE FROM startlxqt OR openbox - both are silent programs. The old assertion asked
+  # for "startlxqt", a binary's name, so it failed on a machine whose desktop had started.
+  #
+  # The unit's message is written BY systemd when the session it supervises comes up, so it is the
+  # one string here that means "the compositor side is running" rather than "a file exists".
+  the console will say "the desktop session on Xvfb"
 
   wait 20s
 
