@@ -20,31 +20,60 @@
 #
 # THE ASSERTION IS TEXT THE COMPOSITOR PAINTS ITSELF. sway draws a bar whose status command
 # echoes a fixed string, so seeing it means sway started, found an output, and rendered.
-
 walkthrough "arch sway microvm - a wayland compositor on a software drm device"
-  resolution 1024x768
-  recording_resolution 1024x768
+resolution 1024x768
+recording_resolution 1024x768
+step "needs arch-vmlinuz arch-initramfs arch.qcow2"
+  needs [arch-vmlinuz, arch-initramfs, arch.qcow2]
 
-  needs arch-vmlinuz arch-initramfs arch.qcow2
+
+step "disk arch.qcow2"
   disk arch.qcow2
+# `without a display` BECAUSE THERE IS NO VGA ADAPTER: `pcie=off` means no GPU and the
+# screen is vkms, which the guest creates itself. `console=ttyS0` is where the boot log
+# and the login prompt are read.
 
-  # `without a display` BECAUSE THERE IS NO VGA ADAPTER: `pcie=off` means no GPU and the
-  # screen is vkms, which the guest creates itself. `console=ttyS0` is where the boot log
-  # and the login prompt are read.
-  boot as a microvm from kernel "arch-vmlinuz" and initramfs "arch-initramfs" with "console=ttyS0 root=/dev/vda rw rootfstype=ext4" without a display with memory 1536, waiting up to 240s
 
-  # THE FIRST FACT: the kernel found the disk and userspace started.
-  the console will say "login"
+step "boot as a microvm from kernel \"arch-vmlinuz\" and initramfs \"arch-initramfs\" with \"console=ttyS0 root=/dev/vda rw rootfstype=ext4\" without a display with memory 1536, waiting up to 240s"
+  boot
+  initrd arch-initramfs
+  kernel arch-vmlinuz
+  kernel_append "console=ttyS0 root=/dev/vda rw rootfstype=ext4"
+  memory_mb 1536
+  microvm
+  microvm_display serial
+  os microvm
+  timeout 240
+# THE FIRST FACT: the kernel found the disk and userspace started.
 
-  # AND THE SESSION IS vmuser's, not root's. PipeWire refuses root outright
-  # (`ConditionUser=!root`), and the desktop depends on it.
-  the console will say "vmuser"
 
-  # THE COMPOSITOR'S OWN BAR. A sway that could not create a backend exits and restarts
-  # forever, and the bar is the first thing that proves it did not.
-  the console will say "sway"
+step "the console will say \"login\""
+  until login
+  from console
+  timeout 180
+# AND THE SESSION IS vmuser's, not root's. PipeWire refuses root outright
+# (`ConditionUser=!root`), and the desktop depends on it.
 
-  # TWENTY SECONDS AT A DESKTOP, so the recording is a machine that stayed up.
-  wait 20s
 
-  stop the machine by killing it, waiting up to 60s
+step "the console will say \"vmuser\""
+  until vmuser
+  from console
+  timeout 180
+# THE COMPOSITOR'S OWN BAR. A sway that could not create a backend exits and restarts
+# forever, and the bar is the first thing that proves it did not.
+
+
+step "the console will say \"sway\""
+  until sway
+  from console
+  timeout 180
+# TWENTY SECONDS AT A DESKTOP, so the recording is a machine that stayed up.
+
+
+step "wait 20s"
+  settle 20
+
+
+step "stop the machine by killing it, waiting up to 60s"
+  stop kill
+  timeout 60

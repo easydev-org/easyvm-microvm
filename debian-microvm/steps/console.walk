@@ -24,41 +24,65 @@
 # THE ASSERTION IS THE SERIAL LINE, NOT A SCREEN. There is no framebuffer on this machine - a GPU
 # needs PCIe - so `microvm_display serial` is stated rather than assumed, and the recording is the
 # "NO DISPLAY" card the recorder draws while a guest has no adapter.
-
 walkthrough "debian microvm - a root filesystem, a serial login, and no PCIe"
-  resolution 1024x768
-  # THE VIDEO IS AN ARTIFACT EVEN WHEN THE GUEST DRAWS NOTHING, so its size is stated.
-  recording_resolution 1024x768
+resolution 1024x768
+# THE VIDEO IS AN ARTIFACT EVEN WHEN THE GUEST DRAWS NOTHING, so its size is stated.
+recording_resolution 1024x768
+# THE THREE FILES THE CI STEP BUILDS, named here so the boot step can refer to them.
+step "needs debian-vmlinuz debian-initramfs debian.qcow2"
+  needs [debian-vmlinuz, debian-initramfs, debian.qcow2]
+# THE ROOT FILESYSTEM, BUILT BY THE CI STEP AND NOT INSTALLED BY THIS FILE.
 
-  # THE THREE FILES THE CI STEP BUILDS, named here so the boot step can refer to them.
-  needs debian-vmlinuz debian-initramfs debian.qcow2
 
-  # THE ROOT FILESYSTEM, BUILT BY THE CI STEP AND NOT INSTALLED BY THIS FILE.
+step "disk debian.qcow2"
   disk debian.qcow2
+# `without a display` AND NOT `with a console`: this guest has no VGA adapter at all, which is the
+# honest shape for a machine with no PCIe. `with a console` would have the engine attach an ISA VGA
+# adapter that nothing ever draws on, and the recording would be a black field rather than a stated
+# absence. The phrase is part of the boot sentence - there is no separate key - which is why the
+# three shapes read as English: `with a desktop`, `with a console`, `without a display`.
+#
+# `rootfstype=ext4` IS NAMED BECAUSE THE INITRAMFS NEEDS TO AGREE WITH THE IMAGE. The disk is ext4
+# by construction; saying so keeps a future initramfs from probing for it, and `console=ttyS0` is
+# the only place this guest can be read.
 
-  # `without a display` AND NOT `with a console`: this guest has no VGA adapter at all, which is the
-  # honest shape for a machine with no PCIe. `with a console` would have the engine attach an ISA VGA
-  # adapter that nothing ever draws on, and the recording would be a black field rather than a stated
-  # absence. The phrase is part of the boot sentence - there is no separate key - which is why the
-  # three shapes read as English: `with a desktop`, `with a console`, `without a display`.
-  #
-  # `rootfstype=ext4` IS NAMED BECAUSE THE INITRAMFS NEEDS TO AGREE WITH THE IMAGE. The disk is ext4
-  # by construction; saying so keeps a future initramfs from probing for it, and `console=ttyS0` is
-  # the only place this guest can be read.
-  boot as a microvm from kernel "debian-vmlinuz" and initramfs "debian-initramfs" with "console=ttyS0 root=/dev/vda rw rootfstype=ext4" without a display with memory 1024, waiting up to 180s
 
-  # THE FIRST FACT: the kernel found the disk. Without `acpi=on` this never appears, and the guest
-  # instead reaches `ALERT! /dev/vda does not exist. Dropping to a shell!` after 30 seconds of
-  # `Begin: Running /scripts/local-block ... done.` - which is what a wrong machine type looks like.
-  the console will say "vda"
+step "boot as a microvm from kernel \"debian-vmlinuz\" and initramfs \"debian-initramfs\" with \"console=ttyS0 root=/dev/vda rw rootfstype=ext4\" without a display with memory 1024, waiting up to 180s"
+  boot
+  initrd debian-initramfs
+  kernel debian-vmlinuz
+  kernel_append "console=ttyS0 root=/dev/vda rw rootfstype=ext4"
+  memory_mb 1024
+  microvm
+  microvm_display serial
+  os microvm
+  timeout 180
+# THE FIRST FACT: the kernel found the disk. Without `acpi=on` this never appears, and the guest
+# instead reaches `ALERT! /dev/vda does not exist. Dropping to a shell!` after 30 seconds of
+# `Begin: Running /scripts/local-block ... done.` - which is what a wrong machine type looks like.
 
-  # AND THE SECOND: init finished and a login is waiting. This is the fact the file exists to
-  # establish - a distribution whose kernel refuses the microvm's default disk transport still
-  # comes all the way up, because the transport it DOES accept is available.
-  the console will say "login"
 
-  # TWENTY SECONDS OF A GUEST AT A PROMPT, so the recording is a machine that stayed up rather than
-  # a boot log that scrolled past.
-  wait 20s
+step "the console will say \"vda\""
+  until vda
+  from console
+  timeout 180
+# AND THE SECOND: init finished and a login is waiting. This is the fact the file exists to
+# establish - a distribution whose kernel refuses the microvm's default disk transport still
+# comes all the way up, because the transport it DOES accept is available.
 
-  stop the machine by killing it, waiting up to 60s
+
+step "the console will say \"login\""
+  until login
+  from console
+  timeout 180
+# TWENTY SECONDS OF A GUEST AT A PROMPT, so the recording is a machine that stayed up rather than
+# a boot log that scrolled past.
+
+
+step "wait 20s"
+  settle 20
+
+
+step "stop the machine by killing it, waiting up to 60s"
+  stop kill
+  timeout 60

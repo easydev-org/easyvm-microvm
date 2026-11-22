@@ -12,32 +12,56 @@
 # THE ASSERTION IS THE SERIAL LINE, NOT A SCREEN. There is no framebuffer on this machine - a GPU
 # needs PCIe, and `pcie=off` means there is none - so the recording is the "NO DISPLAY" card the
 # recorder draws while a guest has no adapter.
-
 walkthrough "opensuse microvm - a root filesystem, a serial login, and no PCIe"
-  resolution 1024x768
-  recording_resolution 1024x768
+resolution 1024x768
+recording_resolution 1024x768
+# THE THREE FILES THE CI STEP BUILDS, named here so the boot step can refer to them.
+step "needs leap-vmlinuz leap-initramfs leap.qcow2"
+  needs [leap-vmlinuz, leap-initramfs, leap.qcow2]
+# THE ROOT FILESYSTEM, BUILT BY THE CI STEP AND NOT INSTALLED BY THIS FILE.
 
-  # THE THREE FILES THE CI STEP BUILDS, named here so the boot step can refer to them.
-  needs leap-vmlinuz leap-initramfs leap.qcow2
 
-  # THE ROOT FILESYSTEM, BUILT BY THE CI STEP AND NOT INSTALLED BY THIS FILE.
+step "disk leap.qcow2"
   disk leap.qcow2
+# `without a display` AND NOT `with a console`: this guest has no VGA adapter at all, which is the
+# honest shape for a machine with no PCIe.
+#
+# `rootfstype=ext4` IS NAMED BECAUSE THE INITRAMFS NEEDS TO AGREE WITH THE IMAGE. `console=ttyS0`
+# is the only place this guest can be read.
 
-  # `without a display` AND NOT `with a console`: this guest has no VGA adapter at all, which is the
-  # honest shape for a machine with no PCIe.
-  #
-  # `rootfstype=ext4` IS NAMED BECAUSE THE INITRAMFS NEEDS TO AGREE WITH THE IMAGE. `console=ttyS0`
-  # is the only place this guest can be read.
-  boot as a microvm from kernel "leap-vmlinuz" and initramfs "leap-initramfs" with "console=ttyS0 root=/dev/vda rw rootfstype=ext4" without a display with memory 1024, waiting up to 180s
 
-  # THE FIRST FACT: the kernel found the disk. Without `acpi=on` this never appears, and the guest
-  # reaches `ALERT! /dev/vda does not exist` or a `VFS: Cannot open root device` panic instead.
-  the console will say "vda"
+step "boot as a microvm from kernel \"leap-vmlinuz\" and initramfs \"leap-initramfs\" with \"console=ttyS0 root=/dev/vda rw rootfstype=ext4\" without a display with memory 1024, waiting up to 180s"
+  boot
+  initrd leap-initramfs
+  kernel leap-vmlinuz
+  kernel_append "console=ttyS0 root=/dev/vda rw rootfstype=ext4"
+  memory_mb 1024
+  microvm
+  microvm_display serial
+  os microvm
+  timeout 180
+# THE FIRST FACT: the kernel found the disk. Without `acpi=on` this never appears, and the guest
+# reaches `ALERT! /dev/vda does not exist` or a `VFS: Cannot open root device` panic instead.
 
-  # THE SECOND: init finished and a login is waiting.
-  the console will say "login"
 
-  # TWENTY SECONDS OF A GUEST AT A PROMPT, so the recording is a machine that stayed up.
-  wait 20s
+step "the console will say \"vda\""
+  until vda
+  from console
+  timeout 180
+# THE SECOND: init finished and a login is waiting.
 
-  stop the machine by killing it, waiting up to 60s
+
+step "the console will say \"login\""
+  until login
+  from console
+  timeout 180
+# TWENTY SECONDS OF A GUEST AT A PROMPT, so the recording is a machine that stayed up.
+
+
+step "wait 20s"
+  settle 20
+
+
+step "stop the machine by killing it, waiting up to 60s"
+  stop kill
+  timeout 60

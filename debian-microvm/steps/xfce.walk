@@ -19,32 +19,60 @@
 # NOTHING HERE ASSERTS ON A PICTURE. A screen-reading assertion needs a reference frame and a match
 # threshold; what this file proves is that the three services reached the state where a picture
 # exists, and `/est/ws` is what carries it to a browser.
-
 walkthrough "debian microvm - xfce on xvfb, streamed by easystream"
-  resolution 1024x768
-  recording_resolution 1024x768
+resolution 1024x768
+recording_resolution 1024x768
+step "needs debian-vmlinuz debian-initramfs debian.qcow2"
+  needs [debian-vmlinuz, debian-initramfs, debian.qcow2]
 
-  needs debian-vmlinuz debian-initramfs debian.qcow2
 
+step "disk debian.qcow2"
   disk debian.qcow2
+# `tty0` AS WELL AS `ttyS0` so the kernel's own messages reach the screen. `without a display`
+# because there is no adapter to attach - the desktop does not use one.
 
-  # `tty0` AS WELL AS `ttyS0` so the kernel's own messages reach the screen. `without a display`
-  # because there is no adapter to attach - the desktop does not use one.
-  boot as a microvm from kernel "debian-vmlinuz" and initramfs "debian-initramfs" with "console=tty0 console=ttyS0 root=/dev/vda rw rootfstype=ext4" without a display with memory 1536, waiting up to 180s
 
-  # THE FIRST FACT: X IS UP. `Xvfb` prints this when the server is ready, and it can only appear if
-  # the server started without a graphics device - which is the claim this whole design rests on.
-  the console will say "Xvfb"
+step "boot as a microvm from kernel \"debian-vmlinuz\" and initramfs \"debian-initramfs\" with \"console=tty0 console=ttyS0 root=/dev/vda rw rootfstype=ext4\" without a display with memory 1536, waiting up to 180s"
+  boot
+  initrd debian-initramfs
+  kernel debian-vmlinuz
+  kernel_append "console=tty0 console=ttyS0 root=/dev/vda rw rootfstype=ext4"
+  memory_mb 1536
+  microvm
+  microvm_display serial
+  os microvm
+  timeout 180
+# THE FIRST FACT: X IS UP. `Xvfb` prints this when the server is ready, and it can only appear if
+# the server started without a graphics device - which is the claim this whole design rests on.
 
-  # AND THE SECOND: the session attached to it. `xfce4-session` is what draws; the line below is its
-  # own startup notice.
-  the console will say "xfce4-session"
 
-  # AND THE THIRD: the stream is listening. easystream prints both ports as it binds them.
-  the console will say "easystream est server"
+step "the console will say \"Xvfb\""
+  until Xvfb
+  from console
+  timeout 180
+# AND THE SECOND: the session attached to it. `xfce4-session` is what draws; the line below is its
+# own startup notice.
 
-  # THIRTY SECONDS OF A RUNNING DESKTOP, so the recording is a machine that stayed up rather than a
-  # boot log that scrolled past.
-  wait 30s
 
-  stop the machine by killing it, waiting up to 60s
+step "the console will say \"xfce4-session\""
+  until xfce4-session
+  from console
+  timeout 180
+# AND THE THIRD: the stream is listening. easystream prints both ports as it binds them.
+
+
+step "the console will say \"easystream est server\""
+  until "easystream est server"
+  from console
+  timeout 180
+# THIRTY SECONDS OF A RUNNING DESKTOP, so the recording is a machine that stayed up rather than a
+# boot log that scrolled past.
+
+
+step "wait 30s"
+  settle 30
+
+
+step "stop the machine by killing it, waiting up to 60s"
+  stop kill
+  timeout 60

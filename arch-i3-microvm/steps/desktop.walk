@@ -15,39 +15,73 @@
 #
 # I3 ALSO SHOWS A FIRST-RUN CONFIGURATION DIALOG, so the assertion names the window manager
 # rather than the dialog: the dialog is a one-time thing and the bar is i3 working.
-
 walkthrough "i3 microvm - i3 on xvfb, captured over xshm"
-  resolution 1024x768
-  recording_resolution 1024x768
+resolution 1024x768
+recording_resolution 1024x768
+step "needs arch-vmlinuz arch-initramfs arch.qcow2"
+  needs [arch-vmlinuz, arch-initramfs, arch.qcow2]
 
-  needs arch-vmlinuz arch-initramfs arch.qcow2
+
+step "disk arch.qcow2"
   disk arch.qcow2
 
-  boot as a microvm from kernel "arch-vmlinuz" and initramfs "arch-initramfs" with "console=ttyS0 root=/dev/vda rw rootfstype=ext4" without a display with memory 1536, waiting up to 240s
 
-  # THE CONSOLE REACHES A LOGIN, which is the boot working.
-  the console will say "login"
+step "boot as a microvm from kernel \"arch-vmlinuz\" and initramfs \"arch-initramfs\" with \"console=ttyS0 root=/dev/vda rw rootfstype=ext4\" without a display with memory 1536, waiting up to 240s"
+  boot
+  initrd arch-initramfs
+  kernel arch-vmlinuz
+  kernel_append "console=ttyS0 root=/dev/vda rw rootfstype=ext4"
+  memory_mb 1536
+  microvm
+  microvm_display serial
+  os microvm
+  timeout 240
+# THE CONSOLE REACHES A LOGIN, which is the boot working.
 
-  # AND THE SESSION IS vmuser's - PipeWire refuses root (`ConditionUser=!root`) and every
-  # desktop here goes through it for audio.
-  the console will say "vmuser"
 
-  # THE BAR, WHICH ONLY RUNS INSIDE i3.
-  #
-  # MEASURED ON RUN 44925759474: the console's last lines were
-  #
-  #	desktop.sh[285]: i3status: trying to auto-detect output_format setting
-  #	desktop.sh[285]: i3status: auto-detected "i3bar"
-  #
-  # WHICH IS i3 WORKING. The old assertion asked for the literal "i3-wm" - that is a PACKAGE NAME,
-  # not something the window manager prints, so the check could not pass on a machine that was
-  # drawing perfectly, and this variant spent its three minutes failing on a healthy desktop.
-  #
-  # i3status is i3's own bar process: it is started by i3's config, it writes this line while it
-  # decides what to draw, and it says "i3bar" only when it has a bar to draw into.
-  the console will say "i3status"
-  the console will say "i3bar"
+step "the console will say \"login\""
+  until login
+  from console
+  timeout 180
+# AND THE SESSION IS vmuser's - PipeWire refuses root (`ConditionUser=!root`) and every
+# desktop here goes through it for audio.
 
-  wait 20s
 
-  stop the machine by killing it, waiting up to 60s
+step "the console will say \"vmuser\""
+  until vmuser
+  from console
+  timeout 180
+# THE BAR, WHICH ONLY RUNS INSIDE i3.
+#
+# MEASURED ON RUN 44925759474: the console's last lines were
+#
+#	desktop.sh[285]: i3status: trying to auto-detect output_format setting
+#	desktop.sh[285]: i3status: auto-detected "i3bar"
+#
+# WHICH IS i3 WORKING. The old assertion asked for the literal "i3-wm" - that is a PACKAGE NAME,
+# not something the window manager prints, so the check could not pass on a machine that was
+# drawing perfectly, and this variant spent its three minutes failing on a healthy desktop.
+#
+# i3status is i3's own bar process: it is started by i3's config, it writes this line while it
+# decides what to draw, and it says "i3bar" only when it has a bar to draw into.
+
+
+step "the console will say \"i3status\""
+  until i3status
+  from console
+  timeout 180
+
+
+step "the console will say \"i3bar\""
+  until i3bar
+  from console
+  timeout 180
+
+
+step "wait 20s"
+  settle 20
+
+
+step "stop the machine by killing it, waiting up to 60s"
+  stop kill
+  timeout 60

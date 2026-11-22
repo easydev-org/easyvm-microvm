@@ -31,28 +31,48 @@
 #
 #	`machine.Boot.Validate` now refuses `microvm_display: desktop` by name rather than recording a
 #	black field. A desktop is a q35 shape.
-
 walkthrough "alpine microvm - a text console drawn on the VGA adapter, recorded"
-  resolution 1024x768
-  # THE VIDEO IS THE ARTIFACT, so its size is stated rather than inherited.
-  recording_resolution 1024x768
+resolution 1024x768
+# THE VIDEO IS THE ARTIFACT, so its size is stated rather than inherited.
+recording_resolution 1024x768
+step "needs alpine-vmlinuz alpine-initramfs alpine.qcow2"
+  needs [alpine-vmlinuz, alpine-initramfs, alpine.qcow2]
+# THE ROOT FILESYSTEM, BUILT BY `.github/alpine-rootfs.sh` AND NOT INSTALLED BY THIS FILE.
 
-  needs alpine-vmlinuz alpine-initramfs alpine.qcow2
 
-  # THE ROOT FILESYSTEM, BUILT BY `.github/alpine-rootfs.sh` AND NOT INSTALLED BY THIS FILE.
+step "disk alpine.qcow2"
   disk alpine.qcow2
+# `tty0` IS THE WHOLE POINT OF THIS FILE. `ttyS0` alone gives a guest that boots perfectly and a
+# recording that is black, because the kernel only writes to the serial line and never touches the
+# adapter. `with a console` asks for `-device isa-vga`, the text adapter a microvm can create.
 
-  # `tty0` IS THE WHOLE POINT OF THIS FILE. `ttyS0` alone gives a guest that boots perfectly and a
-  # recording that is black, because the kernel only writes to the serial line and never touches the
-  # adapter. `with a console` asks for `-device isa-vga`, the text adapter a microvm can create.
-  boot as a microvm from kernel "alpine-vmlinuz" and initramfs "alpine-initramfs" with "console=tty0 console=ttyS0 root=/dev/vda rw rootfstype=ext4" with a console with memory 768, waiting up to 180s
 
-  # THE FIRST FACT: init finished and a getty is asking for a login. It is printed by Alpine's own
-  # getty, which lives in the ROOT FILESYSTEM, so it cannot appear unless /dev/vda was mounted.
-  the console will say "login"
+step "boot as a microvm from kernel \"alpine-vmlinuz\" and initramfs \"alpine-initramfs\" with \"console=tty0 console=ttyS0 root=/dev/vda rw rootfstype=ext4\" with a console with memory 768, waiting up to 180s"
+  boot
+  initrd alpine-initramfs
+  kernel alpine-vmlinuz
+  kernel_append "console=tty0 console=ttyS0 root=/dev/vda rw rootfstype=ext4"
+  memory_mb 768
+  microvm
+  microvm_display terminal
+  os microvm
+  timeout 180
+# THE FIRST FACT: init finished and a getty is asking for a login. It is printed by Alpine's own
+# getty, which lives in the ROOT FILESYSTEM, so it cannot appear unless /dev/vda was mounted.
 
-  # TWENTY SECONDS OF THAT PROMPT ON THE SCREEN, so the mp4 is a machine that stayed up rather than
-  # a boot log that scrolled past.
-  wait 20s
 
-  stop the machine by killing it, waiting up to 60s
+step "the console will say \"login\""
+  until login
+  from console
+  timeout 180
+# TWENTY SECONDS OF THAT PROMPT ON THE SCREEN, so the mp4 is a machine that stayed up rather than
+# a boot log that scrolled past.
+
+
+step "wait 20s"
+  settle 20
+
+
+step "stop the machine by killing it, waiting up to 60s"
+  stop kill
+  timeout 60
