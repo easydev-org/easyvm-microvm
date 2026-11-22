@@ -1,0 +1,82 @@
+# AN ARCH LINUX MICROVM RUNNING KDE PLASMA ON WAYLAND, ON A virtio-gpu DISPLAY.
+#
+# THE DISPLAY DEVICE IS virtio-gpu OVER PCIe: `-M microvm,pcie=on` with `virtio-gpu-pci`
+# gives card0 with a Virtual-1 output AND renderD128 - a KMS output and a render node on one
+# device, which is what KWin's DRM backend needs. See the long note in arch-rootfs.sh.
+#
+# THE CAPTURE IS THE SCANOUT ITSELF, NOT A SCREENSHOT PROTOCOL, AND THAT IS THE POINT HERE.
+#
+# MEASURED, and it is why this variant exists at all: KWin implements NEITHER
+# zwlr_screencopy NOR ext-image-copy-capture, so easystream has no Wayland capture path, and
+# the only other route - xdg-desktop-portal-kde's ScreenCast - stops at a consent dialog
+# nobody can click on a headless boot:
+#
+#	portal: SelectDevices has NO restore token - Start will ask for consent
+#	portal: no Response for /org/freedesktop/portal/desktop/request/1_51/est1
+#
+# Both of those are limitations of READING the compositor through a protocol. The pixels
+# themselves need no protocol: virtio-gpu drives a real framebuffer, so qemu's screendump
+# photographs exactly what KWin scanned out. This walkthrough measures that, which proves the
+# desktop is up and drawing - the same evidence the GNOME variant uses.
+
+walkthrough "plasma microvm - KDE Plasma on Wayland, captured from the scanout"
+resolution 1024x768
+recording_resolution 1024x768
+step "needs arch-vmlinuz arch-initramfs arch.qcow2"
+  needs [arch-vmlinuz, arch-initramfs, arch.qcow2]
+
+step "disk arch.qcow2"
+  disk arch.qcow2
+
+step "boot as a microvm from kernel \"arch-vmlinuz\" and initramfs \"arch-initramfs\" with \"console=ttyS0 root=/dev/vda rw rootfstype=ext4\" with a desktop with memory 1536, waiting up to 240s"
+  boot
+  initrd arch-initramfs
+  kernel arch-vmlinuz
+  kernel_append "console=ttyS0 root=/dev/vda rw rootfstype=ext4"
+  memory_mb 1536
+  microvm
+  microvm_display desktop
+  os microvm
+  timeout 240
+
+# THE KERNEL FOUND THE DISK AND USERSPACE STARTED.
+step "the console will say \"login\""
+  until login
+  from console
+  timeout 180
+
+# AND THE SESSION IS vmuser's - PipeWire refuses root (`ConditionUser=!root`).
+step "the console will say \"vmuser\""
+  until vmuser
+  from console
+  timeout 180
+
+# THE SESSION'S OWN MARKER, printed by the image right before it execs the session command.
+# A plasma that could not start leaves the console quiet after this line.
+step "the console will say \"ARCH-SESSION-STARTING: plasma\""
+  until "ARCH-SESSION-STARTING: plasma"
+  from console
+  timeout 180
+
+# PLASMA TAKES LONGER TO PAINT THAN A BARE COMPOSITOR: kwin_wayland, plasmashell, the
+# panel and the wallpaper all come up in sequence, and plasmashell alone is several
+# hundred milliseconds of layout after its process starts.
+step "wait 30s"
+  settle 30
+
+# THE PIXELS, FROM THE GUEST'S OWN SCANOUT. A machine with no GPU records a uniformly BLACK
+# frame; a KWin that started but never painted a desktop records a uniformly COLOURED one.
+# Plasma's default wallpaper and panel make it neither.
+# THE FRAME COMES THROUGH THE DESKTOP'S OWN PORTAL, NOT FROM A QEMU SCREENDUMP.
+#
+# /opt/portal-capture.sh asks easystream for one frame over its est protocol and decodes
+# the PNG in the guest. Its exit status is the verdict: 0 only when the mean brightness
+# says a desktop was drawn. MEASURED on this image - "PASS mean=133.7 frame=1024x768" with
+# Plasma's wallpaper and panel, and "FAIL mean=0.0" on the same guest when DPMS had blanked
+# the output, which is the failure that looks like a working capture without this test.
+step "ssh /opt/portal-capture.sh"
+  ssh /opt/portal-capture.sh
+
+step "stop the machine by killing it, waiting up to 60s"
+  stop kill
+  timeout 60

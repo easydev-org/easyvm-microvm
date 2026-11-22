@@ -149,6 +149,133 @@ jobs:
             script: .github/arch-rootfs.sh
             desktop: "i3"
             files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          # THE REST OF THE VERIFIED SET. Each of these was booted locally and its screen
+          # captured before it was added; the evidence for each is its own PNG.
+          #
+          #	flashback      the GNOME Flashback panel, Home and Trash icons, the clock
+          #	mate           the Applications/Places/System menus and the window list
+          #	qtile          the Qtile logo and its bar with "Press <M-r> to spawn"
+          #	enlightenment  the first-run language wizard
+          #	deepin         the DDE dock with the circular launcher and the clock
+          #	labwc          a window titled ARCH LABWC MICROVM and its decorations
+          #	wayfire        the same shape, titled ARCH WAYFIRE MICROVM
+          #	hyprland       ARCH HYPRLAND MICROVM over its default wallpaper
+          #	budgie         the Budgie panel and its default wallpaper
+          #	phosh          the lock screen at 720x1280 with "Slide up to unlock"
+          #	xfce-wayland   the full XFCE desktop on labwc
+          #	lxqt-wayland   the LXQt Session Settings dialog with its Wayland page
+          #	qtile-wayland  qtile's bar on the Wayland backend
+          #
+          # THE ONES WITH A MEASURED LIMIT ARE NOT HERE. river, niri, weston, kylin and
+          # treeland are gone entirely. cinnamon-wayland and
+          # enlightenment-wayland were DROPPED: their Wayland compositors expose no capture
+          # protocol - muffin has no zwlr_screencopy and does not export org.gnome.Mutter.ScreenCast,
+          # and E's wl_drm exports no screencopy - so those two are supported on X11 only, which
+          # is the bare `cinnamon` and `enlightenment` rows that ARE here. mangowm was verified
+          # with grim and IS included. Each remaining note lives in arch-rootfs.sh.
+          - tag: rootfs-arch-flashback
+            script: .github/arch-rootfs.sh
+            desktop: "flashback"
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          - tag: rootfs-arch-mate
+            script: .github/arch-rootfs.sh
+            desktop: "mate"
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          - tag: rootfs-arch-qtile
+            script: .github/arch-rootfs.sh
+            desktop: "qtile"
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          - tag: rootfs-arch-enlightenment
+            script: .github/arch-rootfs.sh
+            desktop: "enlightenment"
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          - tag: rootfs-arch-deepin
+            script: .github/arch-rootfs.sh
+            desktop: "deepin"
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          - tag: rootfs-arch-mangowm
+            script: .github/arch-rootfs.sh
+            desktop: "mangowm"
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          - tag: rootfs-arch-labwc
+            script: .github/arch-rootfs.sh
+            desktop: "labwc"
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          - tag: rootfs-arch-wayfire
+            script: .github/arch-rootfs.sh
+            desktop: "wayfire"
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          - tag: rootfs-arch-hyprland
+            script: .github/arch-rootfs.sh
+            desktop: "hyprland"
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          - tag: rootfs-arch-budgie
+            script: .github/arch-rootfs.sh
+            desktop: "budgie"
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          - tag: rootfs-arch-phosh
+            script: .github/arch-rootfs.sh
+            desktop: "phosh"
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          - tag: rootfs-arch-xfce-wayland
+            script: .github/arch-rootfs.sh
+            desktop: "xfce-wayland"
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          - tag: rootfs-arch-lxqt-wayland
+            script: .github/arch-rootfs.sh
+            desktop: "lxqt-wayland"
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          - tag: rootfs-arch-qtile-wayland
+            script: .github/arch-rootfs.sh
+            desktop: "qtile-wayland"
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          # CINNAMON'S WAYLAND SESSION WAS RE-TESTED ON virtio-gpu AND IT NOW PAINTS.
+          #
+          # It had been dropped for a measured reason: on vkms the session was stable but the
+          # frame's max pixel was ZERO - a desktop that was never painted, because muffin is a
+          # Mutter fork and wants a render node AND a KMS output on one card. MEASURED on
+          # virtio-gpu: the full Cinnamon desktop - wallpaper, bottom panel, clock - at mean
+          # brightness 107.4 with a spread of 22.3, plus Cinnamon's own "running without video
+          # hardware acceleration" notice, which is the CORRECT state here and proves muffin
+          # started and probed the GPU.
+          - tag: rootfs-arch-cinnamon-wayland
+            script: .github/arch-rootfs.sh
+            desktop: "cinnamon-wayland"
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          # THE FULL GNOME STACK: GDM AS THE DISPLAY MANAGER, THEN gnome-shell ON WAYLAND, ON A
+          # virtio-gpu DISPLAY OVER PCIe. Verified locally: GDM started, autologin ran, the shell
+          # painted its desktop at 1024x768, and qemu's screendump of that scanout was a full
+          # non-black frame. The portal's ScreenCast needs a consent click that a headless boot
+          # cannot give, so the walkthrough's evidence is `see:`, not easystream - see the walk.
+          - tag: rootfs-arch-gnome
+            script: .github/arch-rootfs.sh
+            desktop: "gnome"
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          # THE MAIN KDE PLASMA SESSION. Verified locally: KWin Wayland came up on the
+          # virtio-gpu, painted its wallpaper and panel, and qemu's screendump of that scanout
+          # was 1024x768 with mean brightness 128.6 and deviation 37.0 - a real desktop.
+          #
+          # IT IS CAPTURED BY `read` (qemu's screendump), NOT BY EASYSTREAM, and that is the
+          # whole point: KWin implements neither zwlr-screencopy nor ext-image-copy-capture, and
+          # KDE's ScreenCast portal stops at a consent dialog nobody can click headless. The
+          # PIXELS need no protocol - virtio-gpu drives a real framebuffer. See the walk file.
+          - tag: rootfs-arch-plasma
+            script: .github/arch-rootfs.sh
+            desktop: "plasma"
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          # THE TWO SPECIALISED KDE SHELLS, VERIFIED THE SAME WAY. plasma-mobile MEASURED its
+          # welcome page over the phone-shell status bar and navigation bar (mean 101.6,
+          # deviation 31.6); plasma-bigscreen its TV launcher grid with the application tiles and
+          # the clock (mean 57.1, deviation 23.4). Same capture path, same reason: see the
+          # plasma row above and the walks.
+          - tag: rootfs-arch-plasma-mobile
+            script: .github/arch-rootfs.sh
+            desktop: "plasma-mobile"
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          - tag: rootfs-arch-plasma-bigscreen
+            script: .github/arch-rootfs.sh
+            desktop: "plasma-bigscreen"
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
           - tag: rootfs-leap-minimal
             script: .github/leap-rootfs.sh
             files: "leap-vmlinuz leap-initramfs leap.qcow2"

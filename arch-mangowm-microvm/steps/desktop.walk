@@ -1,0 +1,90 @@
+# AN ARCH LINUX MICROVM RUNNING MANGOWM ON A VIRTIO-GPU DISPLAY.
+#
+# WAYLAND FAMILY: virtio-gpu is the display device (card0 with a Virtual-1 output plus
+# renderD128), mangowm drives it, and the capture is grim - NOT easystream. MEASURED: mangowm implements zwlr_screencopy (it is wlroots-based), and
+# grim returns a 1024x768 png with every pixel non-black (786432/786432, max 255) showing the
+# foot window titled "ARCH MANGOWM MICROVM". easystream against the same socket serves an
+# all-zero frame, so grim is the capture that proves this desktop.
+#
+# THE SESSION MARKER is what the walkthrough asserts on, because mangowm's own process name is
+# not guaranteed on the console; the image prints it right before the compositor starts.
+
+walkthrough "mangowm microvm - mangowm on virtio-gpu, captured with grim"
+resolution 1024x768
+recording_resolution 1024x768
+step "needs arch-vmlinuz arch-initramfs arch.qcow2"
+  needs [arch-vmlinuz, arch-initramfs, arch.qcow2]
+
+step "disk arch.qcow2"
+  disk arch.qcow2
+
+step "boot as a microvm from kernel \"arch-vmlinuz\" and initramfs \"arch-initramfs\" with \"console=ttyS0 root=/dev/vda rw rootfstype=ext4\" with a desktop with memory 1536, waiting up to 240s"
+  boot
+  initrd arch-initramfs
+  kernel arch-vmlinuz
+  kernel_append "console=ttyS0 root=/dev/vda rw rootfstype=ext4"
+  memory_mb 1536
+  microvm
+  microvm_display desktop
+  os microvm
+  timeout 240
+
+step "the console will say \"login\""
+  until login
+  from console
+  timeout 180
+
+step "the console will say \"vmuser\""
+  until vmuser
+  from console
+  timeout 180
+
+step "the console will say \"ARCH-SESSION-STARTING: mangowm\""
+  until "ARCH-SESSION-STARTING: mangowm"
+  from console
+  timeout 180
+
+# THE GRIM CAPTURE, dumped to the console as base64 by grim-probe.service - its presence and
+# the marker above are the two facts: the compositor started, and a real frame was readable.
+step "the console will say \"GRIM START\""
+  until "GRIM START"
+  from console
+  timeout 180
+
+step "wait 20s"
+  settle 20
+
+# AND THE PIXELS, FROM THE GUEST'S OWN SCANOUT. `see:` is qemu's screendump of the framebuffer
+# virtio-gpu put on the PCIe bus, so a compositor that started but drew nothing is a black,
+# uniform frame and fails the check below. MEASURED on this image: a full desktop at 1024x768.
+step "read the whole screen as \"screen\""
+  read
+    name screen
+
+# TWO QUESTIONS ABOUT ONE FRAME, BECAUSE "NOT BLACK" HAS TWO FAILURE SHAPES. A machine with no
+# GPU records a uniformly BLACK frame; a compositor that never drew records a uniformly COLOURED
+# one, which is not black but is equally empty. MEASURED: a dead frame is mean 0.0 with a mean
+# absolute deviation of 0.03, while real desktops here measure mean 2.6..86 and deviation
+# 5.0..96 - sway's is the darkest (a black wallpaper with a blue bar, mean 2.6, deviation 5.0).
+# So the floors are 1 on both, which is above a dead frame and below every working one.
+step "the screen is not black"
+  check
+    source screen
+    mode mean_between
+    name screen_is_not_black
+    range [1, 255]
+    rect [0, 0, 1024, 768]
+    rect_at [1024, 768]
+
+step "the screen is not one flat colour"
+  check
+    source screen
+    mode spread_between
+    name screen_has_content
+    range [1, 128]
+    rect [0, 0, 1024, 768]
+    rect_at [1024, 768]
+
+step "stop the machine by killing it, waiting up to 60s"
+  stop kill
+  timeout 60

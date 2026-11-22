@@ -1,0 +1,96 @@
+# AN ARCH LINUX MICROVM RUNNING ENLIGHTENMENT ON XORG, ON A virtio-gpu DISPLAY.
+#
+# THE DISPLAY SERVER IS XORG ON THE REAL GPU, NOT Xvfb IN MEMORY.
+#
+# Xvfb was the choice while a microvm had no GPU: it drew into its own heap and needed no DRM
+# node. THE COST WAS THE CONSOLE. QEMU's VNC exports the DISPLAY DEVICE's surface, and pixels
+# that live in a process heap are not on that device - so EasyVM's noVNC console showed a text
+# prompt while the desktop ran where nobody could see it. MEASURED: the VNC framebuffer never
+# delivered a single FramebufferUpdate for an Xvfb guest.
+#
+# MEASURED on virtio-gpu: `modesetting: Driver for Modesetting Kernel Drivers: kms` loads and
+# finds card0; what stopped it was `xf86OpenConsole: Cannot open virtual console 5 (Permission
+# denied)`, because /dev/tty1 is root:tty 0620 and vmuser was not in `tty`. With the group and
+# the logind seat session.service already provided, Xorg takes the VT and draws on the
+# scanned-out framebuffer - so the desktop IS what the console exports.
+#
+# THE CAPTURE IS THEREFORE THE SCANOUT, like every Wayland variant's.
+
+walkthrough "enlightenment microvm - ENLIGHTENMENT captured from the console assertion"
+resolution 1024x768
+recording_resolution 1024x768
+step "needs arch-vmlinuz arch-initramfs arch.qcow2"
+  needs [arch-vmlinuz, arch-initramfs, arch.qcow2]
+
+step "disk arch.qcow2"
+  disk arch.qcow2
+
+step "boot as a microvm from kernel \"arch-vmlinuz\" and initramfs \"arch-initramfs\" with \"console=ttyS0 root=/dev/vda rw rootfstype=ext4\" with a desktop with memory 1536, waiting up to 240s"
+  boot
+  initrd arch-initramfs
+  kernel arch-vmlinuz
+  kernel_append "console=ttyS0 root=/dev/vda rw rootfstype=ext4"
+  memory_mb 1536
+  microvm
+  microvm_display desktop
+  os microvm
+  timeout 240
+
+# THE KERNEL FOUND THE DISK AND USERSPACE STARTED.
+step "the console will say \"login\""
+  until login
+  from console
+  timeout 180
+
+# AND THE SESSION IS vmuser's - PipeWire refuses root (`ConditionUser=!root`).
+step "the console will say \"vmuser\""
+  until vmuser
+  from console
+  timeout 180
+
+# THE SESSION'S OWN PROCESS NAME, which only appears once it is running.
+step "the console will say \"ARCH-SESSION-STARTING: enlightenment\""
+  until "ARCH-SESSION-STARTING: enlightenment"
+  from console
+  timeout 180
+
+step "wait 20s"
+  settle 20
+
+# TWENTY SECONDS AT A DESKTOP, so the capture is a machine that stayed up.
+step "wait 20s"
+  settle 20
+
+# AND THE PIXELS, FROM THE DEVICE THE CONSOLE EXPORTS. `read:` is qemu's screendump of the
+# framebuffer virtio-gpu put on the PCIe bus - the same surface EasyVM's noVNC shows. An
+# X server that started but drew nothing, or that never took the VT, leaves a uniform frame
+# and fails the checks below.
+step "read the whole screen as \"screen\""
+  read
+    name screen
+
+# TWO QUESTIONS ABOUT ONE FRAME, BECAUSE "NOT BLACK" HAS TWO FAILURE SHAPES. A guest with no
+# device records a uniformly BLACK frame; a server that never drew records a uniformly
+# COLOURED one, which is not black but is equally empty. MEASURED: a dead frame is mean 0.0
+# with a mean deviation of 0.03, while the desktops here measure mean 2.6..134.
+step "the screen is not black"
+  check
+    source screen
+    mode mean_between
+    name screen_is_not_black
+    range [1, 255]
+    rect [0, 0, 1024, 768]
+    rect_at [1024, 768]
+
+step "the screen is not one flat colour"
+  check
+    source screen
+    mode spread_between
+    name screen_has_content
+    range [1, 128]
+    rect [0, 0, 1024, 768]
+    rect_at [1024, 768]
+
+step "stop the machine by killing it, waiting up to 60s"
+  stop kill
+  timeout 60

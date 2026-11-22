@@ -1,0 +1,79 @@
+# AN ARCH LINUX MICROVM RUNNING KDE PLASMA MOBILE ON WAYLAND, ON A virtio-gpu DISPLAY.
+#
+# THE DISPLAY DEVICE IS virtio-gpu OVER PCIe, so card0 carries both a Virtual-1 output and
+# renderD128 - the pair KWin's DRM backend needs. See the long note in arch-rootfs.sh.
+#
+# THE CAPTURE IS THE SCANOUT, AND THAT IS WHAT MAKES THIS VARIANT POSSIBLE AT ALL.
+#
+# MEASURED, and it is the whole reason this image ships no easystream evidence: KWin
+# implements NEITHER zwlr_screencopy NOR ext-image-copy-capture - `strings kwin_wayland` finds
+# zero occurrences of either - so there is no Wayland capture protocol to read. The only other
+# route is KDE's ScreenCast portal, and that stops one step short:
+#
+#	portal: SelectDevices has NO restore token - Start will ask for consent
+#	portal: SelectDevices ok
+#	portal: no Response for /org/freedesktop/portal/desktop/request/1_51/est1
+#
+# Everything up to the consent dialog works; the dialog itself needs a human click that a
+# headless boot cannot give, and the permission store cannot be seeded before the first grant
+# (Set and SetPermission both answer "Id easystream not found" - the id is CREATED by a grant).
+#
+# BOTH LIMITS ARE ABOUT READING THE COMPOSITOR, NOT ABOUT THE PIXELS. virtio-gpu drives a real
+# framebuffer, so qemu's screendump photographs exactly what KWin scanned out. That is what this
+# walkthrough measures.
+
+walkthrough "plasma-mobile microvm - the phone shell on Wayland, captured from the scanout"
+resolution 1024x768
+recording_resolution 1024x768
+step "needs arch-vmlinuz arch-initramfs arch.qcow2"
+  needs [arch-vmlinuz, arch-initramfs, arch.qcow2]
+
+step "disk arch.qcow2"
+  disk arch.qcow2
+
+step "boot as a microvm from kernel \"arch-vmlinuz\" and initramfs \"arch-initramfs\" with \"console=ttyS0 root=/dev/vda rw rootfstype=ext4\" with a desktop with memory 1536, waiting up to 240s"
+  boot
+  initrd arch-initramfs
+  kernel arch-vmlinuz
+  kernel_append "console=ttyS0 root=/dev/vda rw rootfstype=ext4"
+  memory_mb 1536
+  microvm
+  microvm_display desktop
+  os microvm
+  timeout 240
+
+step "the console will say \"login\""
+  until login
+  from console
+  timeout 180
+
+step "the console will say \"vmuser\""
+  until vmuser
+  from console
+  timeout 180
+
+# THE SESSION'S OWN MARKER, printed by the image right before it execs the session command.
+step "the console will say \"ARCH-SESSION-STARTING: plasma-mobile\""
+  until "ARCH-SESSION-STARTING: plasma-mobile"
+  from console
+  timeout 180
+
+# THE PHONE SHELL STARTUP: kwin_wayland, plasmashell, plasma-keyboard, then the shell's own
+# first layout. It is slower than a bare compositor, so the settle is longer than the others'.
+step "wait 35s"
+  settle 35
+
+# THE PIXELS, FROM THE GUEST'S OWN SCANOUT.
+# THE FRAME COMES THROUGH THE DESKTOP'S OWN PORTAL, NOT FROM A QEMU SCREENDUMP.
+#
+# /opt/portal-capture.sh asks easystream for one frame over its est protocol and decodes
+# the PNG in the guest. Its exit status is the verdict: 0 only when the mean brightness
+# says a desktop was drawn. MEASURED on this image - "PASS mean=133.7 frame=1024x768" with
+# Plasma's wallpaper and panel, and "FAIL mean=0.0" on the same guest when DPMS had blanked
+# the output, which is the failure that looks like a working capture without this test.
+step "ssh /opt/portal-capture.sh"
+  ssh /opt/portal-capture.sh
+
+step "stop the machine by killing it, waiting up to 60s"
+  stop kill
+  timeout 60

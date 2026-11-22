@@ -156,49 +156,75 @@ jobs:
           - tag: rootfs-arch-i3
             walk: arch-i3-microvm/steps/desktop.walk
             files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          # THE VERIFIED SET, ONE ROW EACH. Every one was booted and captured locally before
+          # its walkthrough was written, so these assert on a process that was MEASURED to
+          # reach a real screen. The ones with a stated limit - river's missing layout
+          # generator, weston's and KWin's absent capture protocol, kylin's unpublished ukui
+          # session, the two session managers that fail internally - are deliberately absent,
+          # because a row here would assert on a desktop that cannot draw.
+          - tag: rootfs-arch-flashback
+            walk: arch-flashback-microvm/steps/desktop.walk
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          - tag: rootfs-arch-mate
+            walk: arch-mate-microvm/steps/desktop.walk
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          - tag: rootfs-arch-qtile
+            walk: arch-qtile-microvm/steps/desktop.walk
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          - tag: rootfs-arch-enlightenment
+            walk: arch-enlightenment-microvm/steps/desktop.walk
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          - tag: rootfs-arch-deepin
+            walk: arch-deepin-microvm/steps/desktop.walk
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          - tag: rootfs-arch-mangowm
+            walk: arch-mangowm-microvm/steps/desktop.walk
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          - tag: rootfs-arch-labwc
+            walk: arch-labwc-microvm/steps/desktop.walk
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          - tag: rootfs-arch-wayfire
+            walk: arch-wayfire-microvm/steps/desktop.walk
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          - tag: rootfs-arch-hyprland
+            walk: arch-hyprland-microvm/steps/desktop.walk
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          - tag: rootfs-arch-budgie
+            walk: arch-budgie-microvm/steps/desktop.walk
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          - tag: rootfs-arch-phosh
+            walk: arch-phosh-microvm/steps/desktop.walk
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          - tag: rootfs-arch-xfce-wayland
+            walk: arch-xfce-wayland-microvm/steps/desktop.walk
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          - tag: rootfs-arch-lxqt-wayland
+            walk: arch-lxqt-wayland-microvm/steps/desktop.walk
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          - tag: rootfs-arch-qtile-wayland
+            walk: arch-qtile-wayland-microvm/steps/desktop.walk
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          - tag: rootfs-arch-cinnamon-wayland
+            walk: arch-cinnamon-wayland-microvm/steps/desktop.walk
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          - tag: rootfs-arch-gnome
+            walk: arch-gnome-microvm/steps/desktop.walk
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          - tag: rootfs-arch-plasma
+            walk: arch-plasma-microvm/steps/desktop.walk
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          - tag: rootfs-arch-plasma-mobile
+            walk: arch-plasma-mobile-microvm/steps/desktop.walk
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
+          - tag: rootfs-arch-plasma-bigscreen
+            walk: arch-plasma-bigscreen-microvm/steps/desktop.walk
+            files: "arch-vmlinuz arch-initramfs arch.qcow2"
           - tag: rootfs-leap-minimal
             walk: leap-microvm/steps/console.walk
             files: "leap-vmlinuz leap-initramfs leap.qcow2"
 
     steps:
-      # THE ENGINE, AT THE WORKSPACE ROOT, BECAUSE THIS JOB BUILDS THE DAEMON FROM SOURCE.
-      #
-      # `go build ./cmd/easyvm` and `docker build -f Containerfile` need the engine's tree, and
-      # `actions/checkout` checks out only the repository that OWNS the workflow. So the engine is
-      # fetched first and this repository is laid over it BELOW.
-      #
-      # A SECOND `actions/checkout` WAS TRIED AND DOES NOT WORK HERE: with `path: .` it writes to the
-      # workspace root, and even `clean: false` leaves the action removing what a previous checkout
-      # put there. Measured twice, both times as `go.mod does not exist`.
       - uses: actions/checkout@v4
-        with:
-          repository: easydev-org/easyvm
-          ref: main
-
-      # AND THIS REPOSITORY IS ALREADY ON DISK, because the workflow that is running belongs to it.
-      # `actions/checkout` fetched it into `$GITHUB_WORKSPACE` before any of this, which the engine
-      # checkout then replaced - so it is fetched ONCE MORE, into its own directory, and copied over.
-      #
-      # THE WALKTHROUGHS, THE ROOTFS SCRIPTS AND `shapes/`, AND NOTHING ELSE. Copying the engine's own
-      # directories back over themselves is what a `for d in */` loop did on the first attempt, and it
-      # copied `cmd/` over `cmd/` while the walkthroughs were never on disk at all.
-      - name: lay this repository over the engine
-        run: |
-          set -eux
-          # THE TOKEN, BECAUSE THIS REPOSITORY IS PRIVATE AND `git clone` cannot prompt:
-          #
-          #	fatal: could not read Username for 'https://github.com': No such device or address
-          #
-          # `dependency-pull` rather than a raw token in the URL: it is what `actions/checkout` itself
-          # uses, it is scoped to this run, and it appears in no log line.
-          git -c "http.https://github.com/.extraheader=Authorization: basic $(printf 'x-access-token:%s' "${{ github.token }}" | base64 -w0)" \
-            clone --quiet --depth 1 \
-            "https://github.com/${GITHUB_REPOSITORY}.git" /tmp/walkthroughs
-          for d in /tmp/walkthroughs/*/ /tmp/walkthroughs/.github/ /tmp/walkthroughs/shapes/; do
-            if [ -e "$d" ]; then cp -a "$d" "$GITHUB_WORKSPACE/"; fi
-          done
-          ls -d cmd internal Containerfile go.mod
-          ls -d */ | head -20
 
       # THE PUBLISHED ARTIFACT, NOT A LOCAL BUILD. A boot test of a locally built image would prove
       # the script works and say nothing about the bytes a consumer actually downloads - and the
@@ -293,7 +319,8 @@ jobs:
           # `serve` PRINTS ITS READY LINE ONLY AFTER IT HAS THE LOCK, so this waits for readiness
           # rather than sleeping a fixed number of seconds.
           for i in $(seq 1 60); do
-            if docker logs easyvm 2>&1 | grep -q 'listening on'; then break; fi
+            logs="$(docker logs easyvm 2>&1 || true)"
+            case "$logs" in *"listening on"*) break ;; esac
             sleep 1
           done
           docker logs easyvm 2>&1 | tail -10

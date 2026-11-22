@@ -1,0 +1,81 @@
+# AN ARCH LINUX MICROVM RUNNING CINNAMON ON WAYLAND (MUFFIN), ON A virtio-gpu DISPLAY.
+#
+# THE DISPLAY DEVICE IS virtio-gpu OVER PCIe. muffin is a Mutter fork, so it wants what GDM
+# wants: an EGL device carrying a render node AND a KMS output on the same card.
+#
+# WHY THIS VARIANT IS BEING RE-TESTED. It was dropped once, and the record says exactly why:
+# on vkms the session was STABLE (the session marker printed once, no restart loop) and
+# easystream attached and reported "encoder opened 1024x768" - but the frame's max pixel was
+# ZERO. That is not a capture failure, it is a desktop that was never painted, and the cause
+# was the same one that stopped GDM: vkms has no render node, vgem's render node has no
+# output, and Mutter-style code ignores a non-primary GPU.
+#
+# So the question this walk asks is not "can it be captured" - the scanout needs no capture
+# protocol - but "does it paint now that there is a device it will accept".
+
+walkthrough "cinnamon-wayland microvm - Cinnamon on muffin, captured from the scanout"
+resolution 1024x768
+recording_resolution 1024x768
+step "needs arch-vmlinuz arch-initramfs arch.qcow2"
+  needs [arch-vmlinuz, arch-initramfs, arch.qcow2]
+
+step "disk arch.qcow2"
+  disk arch.qcow2
+
+step "boot as a microvm from kernel \"arch-vmlinuz\" and initramfs \"arch-initramfs\" with \"console=ttyS0 root=/dev/vda rw rootfstype=ext4\" with a desktop with memory 1536, waiting up to 240s"
+  boot
+  initrd arch-initramfs
+  kernel arch-vmlinuz
+  kernel_append "console=ttyS0 root=/dev/vda rw rootfstype=ext4"
+  memory_mb 1536
+  microvm
+  microvm_display desktop
+  os microvm
+  timeout 240
+
+step "the console will say \"login\""
+  until login
+  from console
+  timeout 180
+
+step "the console will say \"vmuser\""
+  until vmuser
+  from console
+  timeout 180
+
+# THE SESSION'S OWN MARKER. A session that restarts prints this line repeatedly.
+step "the console will say \"ARCH-SESSION-STARTING: cinnamon-wayland\""
+  until "ARCH-SESSION-STARTING: cinnamon-wayland"
+  from console
+  timeout 180
+
+# MUFFIN IS A COMPOSITOR WITH A FULL SHELL AROUND IT: the panel, the desktop icons
+# (nemo-desktop) and the window manager all come up after the compositor does.
+step "wait 30s"
+  settle 30
+
+step "read the whole screen as \"screen\""
+  read
+    name screen
+
+step "the screen is not black"
+  check
+    source screen
+    mode mean_between
+    name screen_is_not_black
+    range [1, 255]
+    rect [0, 0, 1024, 768]
+    rect_at [1024, 768]
+
+step "the screen is not one flat colour"
+  check
+    source screen
+    mode spread_between
+    name screen_has_content
+    range [1, 128]
+    rect [0, 0, 1024, 768]
+    rect_at [1024, 768]
+
+step "stop the machine by killing it, waiting up to 60s"
+  stop kill
+  timeout 60
