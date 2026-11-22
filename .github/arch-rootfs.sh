@@ -434,6 +434,34 @@ fi
 KVER=$(ls "$ROOT/usr/lib/modules" | head -1)
 log "kernel $KVER"
 
+# `depmod` RUNS HERE BECAUSE THE PACKAGE'S OWN HOOK DOES NOT.
+#
+# `modprobe virtio-gpu` is how the guest gets /dev/dri/card0 (see gpu.service below), and modprobe
+# reads `modules.dep` - a file the `linux` package generates from a pacman hook. MEASURED: that hook
+# is one of the two that fail in a chroot (the same block above records `systemd-tmpfiles` and the
+# journal catalog), so `modules.dep` was never written and every desktop variant booted to a BLACK
+# FRAME: gpu.service answered
+#
+#	virtio-gpu: card0 renderD128        <- only after modprobe worked
+#	(absent)                            <- what actually happened: no nodes, no card
+#
+# and the walk's own check said so plainly - `screen_is_not_black = false (mean brightness 0.7231)` -
+# while the workflow called it a success because the walk had FINISHED. All twenty-five variants
+# measured 0.7231, which is qemu's empty framebuffer to four decimal places.
+#
+# `depmod` IS IDEMPOTENT AND CHEAP: it reads the modules on disk and writes their dependency map.
+# Running it explicitly is what makes the image independent of whether a package hook fired.
+chroot "$ROOT" /sbin/depmod "$KVER" || {
+	log "depmod failed; modprobe cannot resolve virtio-gpu and no desktop would draw"
+	exit 1
+}
+if ! grep -q 'virtio-gpu' "$ROOT/lib/modules/$KVER/modules.dep" 2>/dev/null &&
+	! grep -q 'virtio-gpu' "$ROOT/usr/lib/modules/$KVER/modules.dep" 2>/dev/null; then
+	log "ERROR: modules.dep has no virtio-gpu entry after depmod; the GPU could never load"
+	exit 1
+fi
+log "depmod: modules.dep written, virtio-gpu is resolvable"
+
 # --- 2. the initramfs ---------------------------------------------------------------------
 KERNEL="$ROOT/usr/lib/modules/$KVER/vmlinuz"
 [ -f "$KERNEL" ] || { log "no vmlinuz under $ROOT/usr/lib/modules/$KVER"; exit 1; }

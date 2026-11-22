@@ -77,6 +77,7 @@ step "read the whole screen as \"screen\""
 # with a mean deviation of 0.03, while the desktops here measure mean 2.6..134.
 step "the screen is not black"
   check
+    must true
     source screen
     mode mean_between
     name screen_is_not_black
@@ -86,6 +87,7 @@ step "the screen is not black"
 
 step "the screen is not one flat colour"
   check
+    must true
     source screen
     mode spread_between
     name screen_has_content
