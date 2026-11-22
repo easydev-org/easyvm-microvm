@@ -18,10 +18,10 @@
 #	field - which is what the diskless netboot guest in `verify.walk` produces, because it draws
 #	nothing on the adapter at all.
 #
-# WHAT IT DOES NOT PROVE, AND WHY A DESKTOP CANNOT GO HERE:
+# WHAT IT DOES NOT PROVE, AND WHY THIS FILE STAYS A TEXT CONSOLE:
 #
-#	A microvm has no firmware and no PCIe, and a desktop needs one of the two. MEASURED on both
-#	adapters this machine type can create:
+#	A DESKTOP ON A MICROVM IS POSSIBLE, AND IT NEEDS PCIe - WHICH IS A DIFFERENT MACHINE. MEASURED on
+#	both adapters a NO-PCIe microvm can create:
 #
 #	  virtio-gpu-device   the device attaches, `virtio_gpu` loads, and its probe fails - the virtio
 #	                      status comes back as 0x83 (NEEDS_RESET) and no /dev/dri/card0 ever
@@ -29,8 +29,10 @@
 #	  isa-vga             a text-mode adapter: no DRM node, and no /dev/fb0 either, because
 #	                      CONFIG_FB_VESA needs a VBE BIOS call and there is no firmware
 #
-#	`machine.Boot.Validate` now refuses `microvm_display: desktop` by name rather than recording a
-#	black field. A desktop is a q35 shape.
+#	`microvm_display: desktop` TURNS PCIe ON and attaches `virtio-gpu-pci` instead, which does bind:
+#	`[drm] Initialized virtio_gpu ... card0 card0-Virtual-1 renderD128`. A desktop inside a microvm
+#	is therefore a real shape - see the `arch-*-microvm` files - and this file is the OTHER shape:
+#	a guest with no PCI bus, drawing its TTY on the ISA adapter, recorded as a picture of a console.
 walkthrough "alpine microvm - a text console drawn on the VGA adapter, recorded"
 resolution 1024x768
 # THE VIDEO IS THE ARTIFACT, so its size is stated rather than inherited.
