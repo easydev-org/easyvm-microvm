@@ -63,7 +63,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: easydev-org/easyvm
-          ref: main
+          ref: v0.0.2
 
       # AND THIS REPOSITORY IS ALREADY ON DISK, because the workflow that is running belongs to it.
       # `actions/checkout` fetched it into `$GITHUB_WORKSPACE` before any of this, which the engine
