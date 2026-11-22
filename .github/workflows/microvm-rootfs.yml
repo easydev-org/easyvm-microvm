@@ -6,7 +6,7 @@ name: microvm-rootfs
 # WHY THIS WORKFLOW EXISTS
 #
 # MEASURED: `grep -rl alpine-rootfs .github/workflows/` returned only the two workflows that BOOT an
-# alpine guest - and both of them built the root filesystem themselves. `linux/alpine-microvm/steps/
+# alpine guest - and both of them built the root filesystem themselves. `alpine-microvm/steps/
 # console.walk` had never run in CI before either, so nothing had ever needed the files twice and the
 # cost of rebuilding was never noticed.
 #

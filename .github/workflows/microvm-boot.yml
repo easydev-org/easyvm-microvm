@@ -25,10 +25,10 @@ name: microvm-boot
 # ---------------------------------------------------------------------------------------------------
 # THE FOUR VARIANTS, AND WHY EACH WALKTHROUGH IS THE RIGHT ONE
 #
-#	rootfs-alpine-minimal   linux/alpine-microvm/steps/console.walk
-#	rootfs-debian-minimal   linux/debian-microvm/steps/console.walk
-#	rootfs-debian-xfce      linux/debian-microvm/steps/xfce.walk
-#	rootfs-nixos-minimal    linux/nixos-microvm/steps/console.walk
+#	rootfs-alpine-minimal   alpine-microvm/steps/console.walk
+#	rootfs-debian-minimal   debian-microvm/steps/console.walk
+#	rootfs-debian-xfce      debian-microvm/steps/xfce.walk
+#	rootfs-nixos-minimal    nixos-microvm/steps/console.walk
 #
 # THE WALKTHROUGHS ALREADY EXISTED and already assert the thing that matters: the kernel claimed the
 # disk, userspace started, and a login is waiting. That is the definition of "this rootfs boots", and
@@ -49,43 +49,92 @@ name: microvm-boot
 on:
   push:
     branches: ["**"]
-    # A BOOT TEST ONLY CHANGES WHEN THE WALKTHROUGH, THE IMAGE, OR THE DRIVER DOES. Building on every
-    # push would start four virtual machines per commit for no new information.
+    # A BOOT TEST ONLY CHANGES WHEN THE WALKTHROUGH, THE IMAGE, OR THE DRIVER DOES. Building
+    # on every push would start a virtual machine per commit for no new information. The
+    # engine is not in this repository - the job clones it into the workspace - so only the
+    # walks and the scripts that build their root filesystems are listed here.
     paths:
-      - "linux/alpine-microvm/**"
-      - "linux/debian-microvm/**"
-      - "linux/nixos-microvm/**"
-      - "linux/fedora-microvm/**"
-      - "linux/ubuntu-microvm/**"
-      - "linux/arch-microvm/**"
-      - "linux/arch-sway-microvm/**"
-      - "linux/arch-xfce-microvm/**"
-      - "linux/arch-cinnamon-microvm/**"
-      - "linux/arch-lxqt-microvm/**"
-      - "linux/arch-i3-microvm/**"
-      - "linux/leap-microvm/**"
-      - "internal/**"
-      - "cmd/**"
-      - "Containerfile"
+      - "alpine-microvm/**"
+      - "arch-budgie-microvm/**"
+      - "arch-cinnamon-microvm/**"
+      - "arch-cinnamon-wayland-microvm/**"
+      - "arch-deepin-microvm/**"
+      - "arch-enlightenment-microvm/**"
+      - "arch-flashback-microvm/**"
+      - "arch-gnome-microvm/**"
+      - "arch-hyprland-microvm/**"
+      - "arch-i3-microvm/**"
+      - "arch-labwc-microvm/**"
+      - "arch-lxqt-microvm/**"
+      - "arch-lxqt-wayland-microvm/**"
+      - "arch-mangowm-microvm/**"
+      - "arch-mate-microvm/**"
+      - "arch-microvm/**"
+      - "arch-phosh-microvm/**"
+      - "arch-plasma-bigscreen-microvm/**"
+      - "arch-plasma-microvm/**"
+      - "arch-plasma-mobile-microvm/**"
+      - "arch-qtile-microvm/**"
+      - "arch-qtile-wayland-microvm/**"
+      - "arch-sway-microvm/**"
+      - "arch-wayfire-microvm/**"
+      - "arch-xfce-microvm/**"
+      - "arch-xfce-wayland-microvm/**"
+      - "debian-microvm/**"
+      - "fedora-microvm/**"
+      - "leap-microvm/**"
+      - "nixos-microvm/**"
+      - "ubuntu-microvm/**"
+      - ".github/arch-rootfs.sh"
+      - ".github/alpine-rootfs.sh"
+      - ".github/debian-rootfs.sh"
+      - ".github/fedora-rootfs.sh"
+      - ".github/leap-rootfs.sh"
+      - ".github/ubuntu-rootfs.sh"
+      - ".github/make-initramfs.py"
       - ".github/workflows/microvm-boot.yml"
   pull_request:
     paths:
-      - "linux/alpine-microvm/**"
-      - "linux/debian-microvm/**"
-      - "linux/nixos-microvm/**"
-      - "linux/fedora-microvm/**"
-      - "linux/ubuntu-microvm/**"
-      - "linux/arch-microvm/**"
-      - "linux/arch-sway-microvm/**"
-      - "linux/arch-xfce-microvm/**"
-      - "linux/arch-cinnamon-microvm/**"
-      - "linux/arch-lxqt-microvm/**"
-      - "linux/arch-i3-microvm/**"
-      - "linux/leap-microvm/**"
-      - "internal/**"
-      - "cmd/**"
-      - "Containerfile"
+      - "alpine-microvm/**"
+      - "arch-budgie-microvm/**"
+      - "arch-cinnamon-microvm/**"
+      - "arch-cinnamon-wayland-microvm/**"
+      - "arch-deepin-microvm/**"
+      - "arch-enlightenment-microvm/**"
+      - "arch-flashback-microvm/**"
+      - "arch-gnome-microvm/**"
+      - "arch-hyprland-microvm/**"
+      - "arch-i3-microvm/**"
+      - "arch-labwc-microvm/**"
+      - "arch-lxqt-microvm/**"
+      - "arch-lxqt-wayland-microvm/**"
+      - "arch-mangowm-microvm/**"
+      - "arch-mate-microvm/**"
+      - "arch-microvm/**"
+      - "arch-phosh-microvm/**"
+      - "arch-plasma-bigscreen-microvm/**"
+      - "arch-plasma-microvm/**"
+      - "arch-plasma-mobile-microvm/**"
+      - "arch-qtile-microvm/**"
+      - "arch-qtile-wayland-microvm/**"
+      - "arch-sway-microvm/**"
+      - "arch-wayfire-microvm/**"
+      - "arch-xfce-microvm/**"
+      - "arch-xfce-wayland-microvm/**"
+      - "debian-microvm/**"
+      - "fedora-microvm/**"
+      - "leap-microvm/**"
+      - "nixos-microvm/**"
+      - "ubuntu-microvm/**"
+      - ".github/arch-rootfs.sh"
+      - ".github/alpine-rootfs.sh"
+      - ".github/debian-rootfs.sh"
+      - ".github/fedora-rootfs.sh"
+      - ".github/leap-rootfs.sh"
+      - ".github/ubuntu-rootfs.sh"
+      - ".github/make-initramfs.py"
       - ".github/workflows/microvm-boot.yml"
+
   # AND THE ROOTFS PUBLISHER, because it is the thing that can break a variant without touching a
   # line of Go: a bad `DESKTOP` switch produces an image that builds and cannot boot.
   workflow_run:
@@ -224,7 +273,44 @@ jobs:
             files: "leap-vmlinuz leap-initramfs leap.qcow2"
 
     steps:
+      # THE ENGINE, AT THE WORKSPACE ROOT, BECAUSE THIS JOB BUILDS THE DAEMON FROM SOURCE.
+      #
+      # `go build ./cmd/easyvm` and `docker build -f Containerfile` need the engine's tree, and
+      # `actions/checkout` checks out only the repository that OWNS the workflow. So the engine is
+      # fetched first and this repository is laid over it BELOW.
+      #
+      # A SECOND `actions/checkout` WAS TRIED AND DOES NOT WORK HERE: with `path: .` it writes to the
+      # workspace root, and even `clean: false` leaves the action removing what a previous checkout
+      # put there. Measured twice, both times as `go.mod does not exist`.
       - uses: actions/checkout@v4
+        with:
+          repository: easydev-org/easyvm
+          ref: main
+
+      # AND THIS REPOSITORY IS ALREADY ON DISK, because the workflow that is running belongs to it.
+      # `actions/checkout` fetched it into `$GITHUB_WORKSPACE` before any of this, which the engine
+      # checkout then replaced - so it is fetched ONCE MORE, into its own directory, and copied over.
+      #
+      # THE WALKTHROUGHS, THE ROOTFS SCRIPTS AND `shapes/`, AND NOTHING ELSE. Copying the engine's own
+      # directories back over themselves is what a `for d in */` loop did on the first attempt, and it
+      # copied `cmd/` over `cmd/` while the walkthroughs were never on disk at all.
+      - name: lay this repository over the engine
+        run: |
+          set -eux
+          # THE TOKEN, BECAUSE THIS REPOSITORY IS PRIVATE AND `git clone` cannot prompt:
+          #
+          #	fatal: could not read Username for 'https://github.com': No such device or address
+          #
+          # `dependency-pull` rather than a raw token in the URL: it is what `actions/checkout` itself
+          # uses, it is scoped to this run, and it appears in no log line.
+          git -c "http.https://github.com/.extraheader=Authorization: basic $(printf 'x-access-token:%s' "${{ github.token }}" | base64 -w0)" \
+            clone --quiet --depth 1 \
+            "https://github.com/${GITHUB_REPOSITORY}.git" /tmp/walkthroughs
+          for d in /tmp/walkthroughs/*/ /tmp/walkthroughs/.github/ /tmp/walkthroughs/shapes/; do
+            if [ -e "$d" ]; then cp -a "$d" "$GITHUB_WORKSPACE/"; fi
+          done
+          ls -d cmd internal Containerfile go.mod
+          ls -d */ | head -20
 
       # THE PUBLISHED ARTIFACT, NOT A LOCAL BUILD. A boot test of a locally built image would prove
       # the script works and say nothing about the bytes a consumer actually downloads - and the
@@ -319,8 +405,7 @@ jobs:
           # `serve` PRINTS ITS READY LINE ONLY AFTER IT HAS THE LOCK, so this waits for readiness
           # rather than sleeping a fixed number of seconds.
           for i in $(seq 1 60); do
-            logs="$(docker logs easyvm 2>&1 || true)"
-            case "$logs" in *"listening on"*) break ;; esac
+            if docker logs easyvm 2>&1 | grep -q 'listening on'; then break; fi
             sleep 1
           done
           docker logs easyvm 2>&1 | tail -10
