@@ -318,9 +318,39 @@ jobs:
           docker exec easyvm ip link show easyvm-udp
           # UP IS NOT ENOUGH ON ITS OWN: a device that is UP but has no address would still accept the
           # route and blackhole everything it captured. Both are checked.
-          docker exec easyvm ip -4 addr show easyvm-udp | grep -q '10.99.0.1/24'
+          #
+          # THE ADDRESS AND THE TABLE ARE NOT CONSTANTS, AND ASSERTING THEM AS IF THEY WERE WAS THE
+          # BUG. easytun derives both from the DEVICE NAME - `tableFor` hashes the name into 100..199
+          # and `addrFor` puts that table's last two digits in the third octet - so two relays in one
+          # namespace cannot claim one /24. For `easyvm-udp` the hash lands on table 176 and the
+          # device is 10.99.76.1/24.
+          #
+          # MEASURED on run 45152237096: the device was created, UP and LOWER_UP, and this step failed
+          # `grep -q 10.99.0.1/24` - on a hard-coded pair that had drifted from the library. The
+          # device was right; the assertion was reading a value nobody promises.
+          #
+          # SO THE ADDRESS IS READ OFF THE DEVICE AND THEN CHECKED FOR THE SHAPE, and the table is
+          # read from the device's own route. The claim is "addressed, raised, routed", which is what
+          # the comment above always said; it never needed particular numbers.
+          addr=$(docker exec easyvm ip -4 -o addr show easyvm-udp \
+                 | awk '{print $4}' | head -1)
+          echo "easyvm-udp is addressed $addr"
+          case "$addr" in
+            10.99.*.1/24) ;;
+            *) echo "::error::easyvm-udp is not addressed from the 10.99.x.1/24 range the relay owns:" \
+                      "got [$addr]"; exit 1 ;;
+          esac
           docker exec easyvm ip link show easyvm-udp | grep -q 'state UP\|,UP'
-          docker exec easyvm ip route show table 511 | grep -q 'default dev easyvm-udp'
+          # THE TABLE IS WHATEVER THE ROUTE WENT INTO, and it must be one the device answers for.
+          table=$(docker exec easyvm ip route show | awk '$0 ~ /dev easyvm-udp/ { for(i=1;i<=NF;i++) if($i=="table") print $(i+1) }' | head -1)
+          [ -n "$table" ] || {
+            echo "::error::no route through easyvm-udp exists in any table"
+            docker exec easyvm ip route show
+            exit 1
+          }
+          echo "easyvm-udp routes through table $table"
+          docker exec easyvm ip route show table "$table" | grep -q 'default dev easyvm-udp'
+          echo "table=$table" >> "$GITHUB_ENV"
 
       # THE POLICY RULE IS THE HALF THAT KEEPS TCP OFF THIS DEVICE. Without `ipproto udp` every guest
       # connection would arrive in the tun instead of at the CONNECT proxy that already carries it, and
@@ -329,10 +359,11 @@ jobs:
         run: |
           set -eux
           docker exec easyvm ip rule show | tee /tmp/rules
-          grep -q 'from 172.30.0.2 ipproto udp lookup 511' /tmp/rules
+          # THE SAME TABLE THE ROUTE STEP FOUND, not a number written here. See that step.
+          grep -q "from 172.30.0.2 ipproto udp lookup $table" /tmp/rules
           # AND NOTHING BROADER. A rule without `ipproto udp` would take the guest's TCP away from the
           # CONNECT proxy that carries it, and the symptom would be a guest with no TCP at all.
-          if grep -E 'from 172\.30\.0\.2 lookup 511$' /tmp/rules; then
+          if grep -E "from 172\.30\.0\.2 lookup $table\$" /tmp/rules; then
             echo "::error::a rule sends ALL of the guest's traffic to the udp relay"
             exit 1
           fi
@@ -361,7 +392,7 @@ jobs:
             echo "::error::the tun device outlived the machine"
             exit 1
           fi
-          if docker exec easyvm ip rule show | grep -q 'lookup 511'; then
+          if docker exec easyvm ip rule show | grep -q "lookup $table"; then
             echo "::error::the policy rule outlived the machine"
             exit 1
           fi
@@ -385,7 +416,7 @@ jobs:
           echo "| the root filesystem builds | \`alpine-rootfs.sh\` produced three non-empty files |" >> "$GITHUB_STEP_SUMMARY"
           echo "| the guest boots to a login | \`console.walk\`, which had never run in CI |" >> "$GITHUB_STEP_SUMMARY"
           echo "| the tun device is created and raised | \`ip link show easyvm-udp\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| it is addressed | \`ip -4 addr\` shows 10.99.0.1/24 |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| it is addressed | \`ip -4 addr\` shows an address from 10.99.x.1/24 |" >> "$GITHUB_STEP_SUMMARY"
           echo "| only UDP is routed into it | \`ip rule\` names \`ipproto udp\`, and no broader rule exists |" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "**Not proven here:** that a datagram reaches the internet. A runner has no proxy; the" >> "$GITHUB_STEP_SUMMARY"
