@@ -70,7 +70,7 @@ step "disk nixos-rootfs.qcow2"
 step "boot as a microvm from kernel \"nixos-kernel\" and initramfs \"nixos-initrd\" with \"console=ttyS0 root=/dev/vda rootfstype=ext4 rw init=/nixos-system/init\" without a display with memory 1536, waiting up to 240s"
   boot
     machine "microvm,accel=kvm,acpi=on,pic=on,rtc=on,pcie=off,graphics=off"
-    args [["-m", "1536"], ["-chardev", "socket,id=qga0,path={{work}}/qga.sock,server=on,wait=off"], ["-device", "isa-serial,chardev=qga0"], ["-drive", "file={{disk}},if=none,format=qcow2,id=target{{discard}}"], ["-device", "virtio-blk-device,drive=target"], ["-netdev", "tap,id=net0,ifname=qemutap0,script=no,downscript=no"], ["-device", "virtio-net-device,netdev=net0,mac=52:54:00:56:4d:01"]]
+    args [["-m", "1536"], ["-chardev", "socket,id=qga0,path={{work}}/qga.sock,server=on,wait=off"], ["-device", "isa-serial,chardev=qga0"], ["-drive", "file={{disk}},if=none,format=qcow2,id=target{{discard}}"], ["-device", "virtio-blk-device,drive=target"], ["-netdev", "tap,id=net0,ifname=qemutap0,script=no,downscript=no"], ["-device", "virtio-net-device,netdev=net0,mac=52:54:00:56:4d:01"], ["-kernel", "{{work}}/alpine-vmlinuz"], ["-initrd", "{{work}}/alpine-initramfs"], ["-append", "console=ttyS0 root=/dev/vda rootfstype=ext4 rw init=/nixos-system/init"]]
     timeout 240
 # THE FIRST FACT: THE ROOT FILESYSTEM WAS MOUNTED, AND IT IS THE DEVICE THE MACHINE ATTACHED.
 #
