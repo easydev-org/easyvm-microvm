@@ -306,9 +306,14 @@ jobs:
           git -c "http.https://github.com/.extraheader=Authorization: basic $(printf 'x-access-token:%s' "${{ github.token }}" | base64 -w0)" \
             clone --quiet --depth 1 \
             "https://github.com/${GITHUB_REPOSITORY}.git" /tmp/walkthroughs
-          for d in /tmp/walkthroughs/*/ /tmp/walkthroughs/.github/ /tmp/walkthroughs/shapes/; do
+          # `shapes/` IS NOT COPIED HERE. It used to be, into the repository root - where
+          # `go:embed` does not look (`internal/machine/shapes/*.yaml` is the path it reads), so the
+          # copy was never compiled in and never reached the daemon. The machine this repository owns
+          # is now passed with `--shapes`, below.
+          for d in /tmp/walkthroughs/*/ /tmp/walkthroughs/.github/; do
             if [ -e "$d" ]; then cp -a "$d" "$GITHUB_WORKSPACE/"; fi
           done
+          cp -a /tmp/walkthroughs/shapes "$GITHUB_WORKSPACE/shapes"
           ls -d cmd internal Containerfile go.mod
           ls -d */ | head -20
 
@@ -381,6 +386,9 @@ jobs:
             cp "/tmp/rootfs/$f" "$work/"
           done
           cp ${{ matrix.walk }} "$work/walkthrough.walk"
+          # THE MACHINE THIS REPOSITORY OWNS, loaded by the daemon instead of the image's own
+          # copies. One definition, here, and a name the daemon did not write is refused.
+          cp -a shapes "$work/shapes"
           ls -l "$work"
 
           # KVM WHEN THE RUNNER HAS IT, TCG WHEN IT DOES NOT. `-e` rather than `-r`, because the
@@ -400,7 +408,7 @@ jobs:
             --device /dev/net/tun:/dev/net/tun \
             $kvm \
             -v "$work:/work" \
-            easyvm-ci:local serve --work /work
+            easyvm-ci:local serve --work /work --shapes /work/shapes
 
           # `serve` PRINTS ITS READY LINE ONLY AFTER IT HAS THE LOCK, so this waits for readiness
           # rather than sleeping a fixed number of seconds.

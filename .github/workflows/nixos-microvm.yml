@@ -218,7 +218,14 @@ jobs:
           git -c "http.https://github.com/.extraheader=Authorization: basic $(printf 'x-access-token:%s' "${{ github.token }}" | base64 -w0)" \
             clone --quiet --depth 1 \
             "https://github.com/${GITHUB_REPOSITORY}.git" /tmp/walkthroughs
-          for d in /tmp/walkthroughs/*/ /tmp/walkthroughs/.github/ /tmp/walkthroughs/shapes/; do
+          # `shapes/` IS NOT COPIED HERE, AND THIS JOB DOES NOT NEED IT. It builds a ROOT FILESYSTEM -
+          # a nixos generation on ext4 - and never starts a daemon, so no machine shape is read. The
+          # copy that used to be in this loop went into the repository root, where `go:embed` does not
+          # look (`internal/machine/shapes/*.yaml` is the path it reads), so it was never compiled in.
+          #
+          # THE JOBS THAT DO BOOT A GUEST copy `shapes/` into the daemon's work directory and pass
+          # `--shapes`; see `alpine-microvm.yml` and `microvm-boot.yml`.
+          for d in /tmp/walkthroughs/*/ /tmp/walkthroughs/.github/; do
             if [ -e "$d" ]; then cp -a "$d" "$GITHUB_WORKSPACE/"; fi
           done
           ls -d cmd internal Containerfile go.mod

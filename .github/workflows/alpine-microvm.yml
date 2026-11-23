@@ -84,9 +84,14 @@ jobs:
           git -c "http.https://github.com/.extraheader=Authorization: basic $(printf 'x-access-token:%s' "${{ github.token }}" | base64 -w0)" \
             clone --quiet --depth 1 \
             "https://github.com/${GITHUB_REPOSITORY}.git" /tmp/walkthroughs
-          for d in /tmp/walkthroughs/*/ /tmp/walkthroughs/.github/ /tmp/walkthroughs/shapes/; do
+          # `shapes/` IS NOT COPIED HERE. It used to be, into the repository root - where
+          # `go:embed` does not look (`internal/machine/shapes/*.yaml` is the path it reads), so the
+          # copy was never compiled in and never reached the daemon. The machine this repository owns
+          # is now passed with `--shapes`, below.
+          for d in /tmp/walkthroughs/*/ /tmp/walkthroughs/.github/; do
             if [ -e "$d" ]; then cp -a "$d" "$GITHUB_WORKSPACE/"; fi
           done
+          cp -a /tmp/walkthroughs/shapes "$GITHUB_WORKSPACE/shapes"
           ls -d cmd internal Containerfile go.mod
           ls -d */ | head -20
 
@@ -227,6 +232,9 @@ jobs:
           # leftovers into the daemon's working directory.
           cp /tmp/alpine-out/alpine-vmlinuz /tmp/alpine-out/alpine-initramfs \
              /tmp/alpine-out/alpine.qcow2 "$work"/
+          # THE MACHINE THIS REPOSITORY OWNS, loaded by the daemon instead of the image's own
+          # copies. One definition, here, and a name the daemon did not write is refused.
+          cp -a shapes "$work/shapes"
           ls -l "$work"
 
 
@@ -269,7 +277,7 @@ jobs:
             -e EASYVM_UDP_PROXY=upstream:7891 \
             -v "$work:/work" \
             -p 8080:8080 \
-            easyvm-ci:local serve --work /work --http :8080
+            easyvm-ci:local serve --work /work --shapes /work/shapes --http :8080
 
           # `serve` PRINTS `[easyvm] listening on http://.../` ONLY AFTER IT HAS THE LOCK, so waiting
           # for that line is waiting for readiness rather than sleeping. Sixty seconds because the
