@@ -33,7 +33,7 @@ step "disk leap.qcow2"
 step "boot as a microvm from kernel \"leap-vmlinuz\" and initramfs \"leap-initramfs\" with \"console=ttyS0 root=/dev/vda rw rootfstype=ext4\" without a display with memory 1024, waiting up to 180s"
   boot
     machine "microvm,accel=kvm,acpi=on,pic=on,rtc=on,pcie=off,graphics=off"
-    args [["-m", "1024"], ["-chardev", "socket,id=qga0,path=qga.sock,server=on,wait=off"], ["-device", "isa-serial,chardev=qga0"], ["-drive", "file=leap.qcow2,if=none,format=qcow2,discard=unmap,id=target"], ["-device", "virtio-blk-device,drive=target"], ["-netdev", "tap,id=net0,ifname=qemutap0,script=no,downscript=no"], ["-device", "virtio-net-device,netdev=net0,mac=52:54:00:56:4d:01"], ["-kernel", "leap-vmlinuz"], ["-initrd", "leap-initramfs"], ["-append", "console=ttyS0 root=/dev/vda rw rootfstype=ext4"]]
+    args [["-cpu", "Skylake-Client-v4"], ["-smp", "4"], ["-m", "1024"], ["-chardev", "socket,id=qga0,path=qga.sock,server=on,wait=off"], ["-device", "isa-serial,chardev=qga0"], ["-drive", "file=leap.qcow2,if=none,format=qcow2,discard=unmap,id=target"], ["-device", "virtio-blk-device,drive=target"], ["-netdev", "tap,id=net0,ifname=qemutap0,script=no,downscript=no"], ["-device", "virtio-net-device,netdev=net0,mac=52:54:00:56:4d:01"], ["-kernel", "leap-vmlinuz"], ["-initrd", "leap-initramfs"], ["-append", "console=ttyS0 root=/dev/vda rw rootfstype=ext4"]]
     timeout 180
 # THE FIRST FACT: the kernel found the disk. Without `acpi=on` this never appears, and the guest
 # reaches `ALERT! /dev/vda does not exist` or a `VFS: Cannot open root device` panic instead.

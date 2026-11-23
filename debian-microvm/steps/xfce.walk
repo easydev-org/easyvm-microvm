@@ -35,7 +35,7 @@ step "disk debian.qcow2"
 step "boot as a microvm from kernel \"debian-vmlinuz\" and initramfs \"debian-initramfs\" with \"console=tty0 console=ttyS0 root=/dev/vda rw rootfstype=ext4\" without a display with memory 1536, waiting up to 180s"
   boot
     machine "microvm,accel=kvm,acpi=on,pic=on,rtc=on,pcie=off,graphics=off"
-    args [["-m", "1536"], ["-chardev", "socket,id=qga0,path=qga.sock,server=on,wait=off"], ["-device", "isa-serial,chardev=qga0"], ["-drive", "file=debian.qcow2,if=none,format=qcow2,discard=unmap,id=target"], ["-device", "virtio-blk-device,drive=target"], ["-netdev", "tap,id=net0,ifname=qemutap0,script=no,downscript=no"], ["-device", "virtio-net-device,netdev=net0,mac=52:54:00:56:4d:01"], ["-kernel", "debian-vmlinuz"], ["-initrd", "debian-initramfs"], ["-append", "console=tty0 console=ttyS0 root=/dev/vda rw rootfstype=ext4"]]
+    args [["-cpu", "Skylake-Client-v4"], ["-smp", "4"], ["-m", "1536"], ["-chardev", "socket,id=qga0,path=qga.sock,server=on,wait=off"], ["-device", "isa-serial,chardev=qga0"], ["-drive", "file=debian.qcow2,if=none,format=qcow2,discard=unmap,id=target"], ["-device", "virtio-blk-device,drive=target"], ["-netdev", "tap,id=net0,ifname=qemutap0,script=no,downscript=no"], ["-device", "virtio-net-device,netdev=net0,mac=52:54:00:56:4d:01"], ["-kernel", "debian-vmlinuz"], ["-initrd", "debian-initramfs"], ["-append", "console=tty0 console=ttyS0 root=/dev/vda rw rootfstype=ext4"]]
     timeout 180
 # THE FIRST FACT: X IS UP. `Xvfb` prints this when the server is ready, and it can only appear if
 # the server started without a graphics device - which is the claim this whole design rests on.
