@@ -1,0 +1,99 @@
+name: arch-desktops
+
+# EVERY ARCH LINUX DESKTOP, BOOTED TO ITS OWN COMPOSITOR - ONE MATRIX ROW PER SESSION.
+#
+# WHAT THIS ADDS: `minimal-microvms.yml` boots the seven MINIMAL root filesystems, and the twenty-four
+# arch desktop images had nothing that started them at all. They have been built and published for
+# weeks: `rootfs-arch-<session>` each, twenty-five tags on ghcr including `arch-minimal`.
+#
+# A DESKTOP ROOTFS IS NOT A MINIMAL ONE WITH PACKAGES ADDED. Each of these starts a compositor that
+# needs a virtual GPU, and a microvm has no firmware to give it one - so the walkthroughs that boot
+# them say `graphics=on` and expect a framebuffer, while the minimal ones say `graphics=off`. That is
+# why the evidence for each is a screenshot of its OWN desktop rather than a login prompt, and why
+# this workflow's artifact is the recording.
+#
+# TWENTY-FOUR LEGS AT ONCE IS MORE THAN THE ORGANISATION'S RUNNER QUOTA, SO A RUN OF THIS FILE QUEUES.
+# That is accepted rather than worked around: a matrix is the only thing here that can select rows, and
+# GitHub evaluates a job-level `if:` before it expands - so an `only:` input that filtered the list
+# would have to be a generator, which is a second place the tag list lives.
+#
+# THE ASSET NAMES ARE THE SAME FOR ALL OF THEM - `arch-vmlinuz`, `arch-initramfs`, `arch.qcow2` - and
+# only the TAG differs, which is why the row carries the tag and the JSON derives the three names.
+
+on:
+  workflow_dispatch:
+    inputs:
+      disks_repository:
+        description: "the ghcr repository that holds the root filesystems"
+        default: "easydev-org/easyvm-microvm"
+
+concurrency:
+  group: arch-desktops
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+  checks: write
+
+jobs:
+  boot:
+    # A JOB-LEVEL `if:` CANNOT SEE `matrix`, so the selection is made IN THE MATRIX - the same
+    # arrangement `artifacts-publish.yml` records, for the same reason.
+    strategy:
+      fail-fast: false
+      matrix:
+        # `only:` IS APPLIED BY THE MATRIX RATHER THAN BY A JOB `if:`, because a job-level `if:` is
+        # evaluated before the matrix expands and sees `matrix` as null. When it is empty every row
+        # is listed; when it names one, the other twenty-three are not scheduled at all.
+        include:
+          # EVERY ROW IS `<tag suffix>`. The three file names are derived from it in the JSON below,
+          # because they are identical for all of them and writing them out 24 times would be 24
+          # places to get one wrong.
+          - session: budgie
+          - session: cinnamon
+          - session: cinnamon-wayland
+          - session: deepin
+          - session: enlightenment
+          - session: flashback
+          - session: gnome
+          - session: hyprland
+          - session: i3
+          - session: labwc
+          - session: lxqt
+          - session: lxqt-wayland
+          - session: mangowm
+          - session: mate
+          - session: phosh
+          - session: plasma
+          - session: plasma-bigscreen
+          - session: plasma-mobile
+          - session: qtile
+          - session: qtile-wayland
+          - session: sway
+          - session: wayfire
+          - session: xfce
+          - session: xfce-wayland
+    uses: easydev-org/easyvm/.github/workflows/stage.yml@v0.0.3-dev
+    secrets: inherit
+    with:
+      image_repository: easydev-org/easyvm
+      image_tag: v0.0.3-dev
+      disk_gb: "12"
+      group: arch-${{ matrix.session }}
+      disks_repository: ${{ inputs.disks_repository }}
+      stages: |
+        [
+          {
+            "name": "microvm-arch-${{ matrix.session }}",
+            "file": "arch-${{ matrix.session }}-microvm/steps/desktop.walk",
+            "pull": "",
+            "assets": [
+              "rootfs-arch-${{ matrix.session }}:arch-vmlinuz.tar",
+              "rootfs-arch-${{ matrix.session }}:arch-initramfs.tar",
+              "rootfs-arch-${{ matrix.session }}:arch.qcow2.tar"
+            ],
+            "out": "",
+            "timeout": 45
+          }
+        ]
