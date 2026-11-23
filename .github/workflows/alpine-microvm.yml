@@ -342,10 +342,27 @@ jobs:
           esac
           docker exec easyvm ip link show easyvm-udp | grep -q 'state UP\|,UP'
           # THE TABLE IS WHATEVER THE ROUTE WENT INTO, and it must be one the device answers for.
-          table=$(docker exec easyvm ip route show | awk '$0 ~ /dev easyvm-udp/ { for(i=1;i<=NF;i++) if($i=="table") print $(i+1) }' | head -1)
+          # THE TABLE IS FOUND BY ASKING EACH CANDIDATE, NOT BY PARSING `ip route show`.
+          #
+          # MEASURED on run 45179066981: `ip route show` printed
+          #
+          #	10.99.76.0/24 dev easyvm-udp proto kernel scope link src 10.99.76.1
+          #
+          # which carries no `table` field at all - it is the LOCAL route the kernel adds when the
+          # device is addressed, in the main table. A policy table's default route only appears when
+          # that table is named, so the parse below answered empty and the step failed with
+          # "no route through easyvm-udp exists in any table" about a relay that had one.
+          table=""
+          for n in $(seq 100 199); do
+            if docker exec easyvm ip route show table "$n" 2>/dev/null | grep -q 'default dev easyvm-udp'; then
+              table=$n
+              break
+            fi
+          done
           [ -n "$table" ] || {
-            echo "::error::no route through easyvm-udp exists in any table"
-            docker exec easyvm ip route show
+            echo "::error::no policy table holds a default route through easyvm-udp"
+            docker exec easyvm ip rule show
+            for n in 100 101 176; do echo "--- table $n"; docker exec easyvm ip route show table "$n" 2>&1; done
             exit 1
           }
           echo "easyvm-udp routes through table $table"
