@@ -47,99 +47,15 @@ name: microvm-boot
 # variant, and it answers it by starting the machine.
 
 on:
-  push:
-    branches: ["**"]
-    # A BOOT TEST ONLY CHANGES WHEN THE WALKTHROUGH, THE IMAGE, OR THE DRIVER DOES. Building
-    # on every push would start a virtual machine per commit for no new information. The
-    # engine is not in this repository - the job clones it into the workspace - so only the
-    # walks and the scripts that build their root filesystems are listed here.
-    paths:
-      - "alpine-microvm/**"
-      - "arch-budgie-microvm/**"
-      - "arch-cinnamon-microvm/**"
-      - "arch-cinnamon-wayland-microvm/**"
-      - "arch-deepin-microvm/**"
-      - "arch-enlightenment-microvm/**"
-      - "arch-flashback-microvm/**"
-      - "arch-gnome-microvm/**"
-      - "arch-hyprland-microvm/**"
-      - "arch-i3-microvm/**"
-      - "arch-labwc-microvm/**"
-      - "arch-lxqt-microvm/**"
-      - "arch-lxqt-wayland-microvm/**"
-      - "arch-mangowm-microvm/**"
-      - "arch-mate-microvm/**"
-      - "arch-microvm/**"
-      - "arch-phosh-microvm/**"
-      - "arch-plasma-bigscreen-microvm/**"
-      - "arch-plasma-microvm/**"
-      - "arch-plasma-mobile-microvm/**"
-      - "arch-qtile-microvm/**"
-      - "arch-qtile-wayland-microvm/**"
-      - "arch-sway-microvm/**"
-      - "arch-wayfire-microvm/**"
-      - "arch-xfce-microvm/**"
-      - "arch-xfce-wayland-microvm/**"
-      - "debian-microvm/**"
-      - "fedora-microvm/**"
-      - "leap-microvm/**"
-      - "nixos-microvm/**"
-      - "ubuntu-microvm/**"
-      - ".github/arch-rootfs.sh"
-      - ".github/alpine-rootfs.sh"
-      - ".github/debian-rootfs.sh"
-      - ".github/fedora-rootfs.sh"
-      - ".github/leap-rootfs.sh"
-      - ".github/ubuntu-rootfs.sh"
-      - ".github/make-initramfs.py"
-      - ".github/workflows/microvm-boot.yml"
-  pull_request:
-    paths:
-      - "alpine-microvm/**"
-      - "arch-budgie-microvm/**"
-      - "arch-cinnamon-microvm/**"
-      - "arch-cinnamon-wayland-microvm/**"
-      - "arch-deepin-microvm/**"
-      - "arch-enlightenment-microvm/**"
-      - "arch-flashback-microvm/**"
-      - "arch-gnome-microvm/**"
-      - "arch-hyprland-microvm/**"
-      - "arch-i3-microvm/**"
-      - "arch-labwc-microvm/**"
-      - "arch-lxqt-microvm/**"
-      - "arch-lxqt-wayland-microvm/**"
-      - "arch-mangowm-microvm/**"
-      - "arch-mate-microvm/**"
-      - "arch-microvm/**"
-      - "arch-phosh-microvm/**"
-      - "arch-plasma-bigscreen-microvm/**"
-      - "arch-plasma-microvm/**"
-      - "arch-plasma-mobile-microvm/**"
-      - "arch-qtile-microvm/**"
-      - "arch-qtile-wayland-microvm/**"
-      - "arch-sway-microvm/**"
-      - "arch-wayfire-microvm/**"
-      - "arch-xfce-microvm/**"
-      - "arch-xfce-wayland-microvm/**"
-      - "debian-microvm/**"
-      - "fedora-microvm/**"
-      - "leap-microvm/**"
-      - "nixos-microvm/**"
-      - "ubuntu-microvm/**"
-      - ".github/arch-rootfs.sh"
-      - ".github/alpine-rootfs.sh"
-      - ".github/debian-rootfs.sh"
-      - ".github/fedora-rootfs.sh"
-      - ".github/leap-rootfs.sh"
-      - ".github/ubuntu-rootfs.sh"
-      - ".github/make-initramfs.py"
-      - ".github/workflows/microvm-boot.yml"
-
-  # AND THE ROOTFS PUBLISHER, because it is the thing that can break a variant without touching a
-  # line of Go: a bad `DESKTOP` switch produces an image that builds and cannot boot.
-  workflow_run:
-    workflows: ["microvm-rootfs", "nixos-microvm"]
-    types: [completed]
+  # MANUAL ONLY, AND THE REASON IS THE SIZE OF THE MATRIX.
+  #
+  # THIS USED TO FIRE ON A PUSH TO ANY `*-microvm/**` PATH. There are twenty-four legs - five
+  # distributions and their desktops - and a one-line change to a shared walk started all of them,
+  # which queued behind `alpine-microvm` and made "did the change work" a question about the queue.
+  #
+  # THE BOOT TEST STILL EXISTS AND IS STILL WANTED; what it stopped being is a side effect of a
+  # commit. `gh workflow run microvm-boot.yml` runs every leg, which is what a scheduled sweep or a
+  # deliberate check wants; a single distribution is `alpine-microvm.yml`, which boots one.
   workflow_dispatch:
 
 concurrency:
