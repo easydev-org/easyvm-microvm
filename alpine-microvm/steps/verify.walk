@@ -20,8 +20,9 @@ step "needs alpine.iso alpine-vmlinuz alpine-initramfs"
 
 
 step "make a disk \"alpine.qcow2\" of 1 GiB"
-  disk alpine.qcow2
-  disk_gb 1
+  disk
+    file alpine.qcow2
+    size 1
 
 
 step "boot as a microvm from kernel \"alpine-vmlinuz\" and initramfs \"alpine-initramfs\", waiting up to 300s"
