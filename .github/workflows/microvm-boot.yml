@@ -291,7 +291,7 @@ jobs:
       # `actions/checkout` fetched it into `$GITHUB_WORKSPACE` before any of this, which the engine
       # checkout then replaced - so it is fetched ONCE MORE, into its own directory, and copied over.
       #
-      # THE WALKTHROUGHS, THE ROOTFS SCRIPTS AND `shapes/`, AND NOTHING ELSE. Copying the engine's own
+      # THE WALKTHROUGHS AND THE ROOTFS SCRIPTS, AND NOTHING ELSE. Copying the engine's own
       # directories back over themselves is what a `for d in */` loop did on the first attempt, and it
       # copied `cmd/` over `cmd/` while the walkthroughs were never on disk at all.
       - name: lay this repository over the engine
@@ -306,14 +306,9 @@ jobs:
           git -c "http.https://github.com/.extraheader=Authorization: basic $(printf 'x-access-token:%s' "${{ github.token }}" | base64 -w0)" \
             clone --quiet --depth 1 \
             "https://github.com/${GITHUB_REPOSITORY}.git" /tmp/walkthroughs
-          # `shapes/` IS NOT COPIED HERE. It used to be, into the repository root - where
-          # `go:embed` does not look (`internal/machine/shapes/*.yaml` is the path it reads), so the
-          # copy was never compiled in and never reached the daemon. The machine this repository owns
-          # is now passed with `--shapes`, below.
           for d in /tmp/walkthroughs/*/ /tmp/walkthroughs/.github/; do
             if [ -e "$d" ]; then cp -a "$d" "$GITHUB_WORKSPACE/"; fi
           done
-          cp -a /tmp/walkthroughs/shapes "$GITHUB_WORKSPACE/shapes"
           ls -d cmd internal Containerfile go.mod
           ls -d */ | head -20
 
@@ -386,9 +381,6 @@ jobs:
             cp "/tmp/rootfs/$f" "$work/"
           done
           cp ${{ matrix.walk }} "$work/walkthrough.walk"
-          # THE MACHINE THIS REPOSITORY OWNS, loaded by the daemon instead of the image's own
-          # copies. One definition, here, and a name the daemon did not write is refused.
-          cp -a shapes "$work/shapes"
           ls -l "$work"
 
           # KVM WHEN THE RUNNER HAS IT, TCG WHEN IT DOES NOT. `-e` rather than `-r`, because the
@@ -408,7 +400,7 @@ jobs:
             --device /dev/net/tun:/dev/net/tun \
             $kvm \
             -v "$work:/work" \
-            easyvm-ci:local serve --work /work --shapes /work/shapes
+            easyvm-ci:local serve --work /work
 
           # `serve` PRINTS ITS READY LINE ONLY AFTER IT HAS THE LOCK, so this waits for readiness
           # rather than sleeping a fixed number of seconds.

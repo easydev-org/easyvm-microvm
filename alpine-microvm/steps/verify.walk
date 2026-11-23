@@ -26,11 +26,9 @@ step "make a disk \"alpine.qcow2\" of 1 GiB"
 
 step "boot as a microvm from kernel \"alpine-vmlinuz\" and initramfs \"alpine-initramfs\", waiting up to 300s"
   boot
-  initrd alpine-initramfs
-  kernel alpine-vmlinuz
-  microvm
-  os microvm
-  timeout 300
+    machine "microvm,accel=kvm,acpi=on,pic=on,rtc=on,pcie=off,graphics=on"
+    args [["-chardev", "socket,id=qga0,path={{work}}/qga.sock,server=on,wait=off"], ["-device", "isa-serial,chardev=qga0"], ["-device", "isa-vga,vgamem_mb=16"], ["-drive", "file={{disk}},if=none,format=qcow2,id=target{{discard}}"], ["-device", "virtio-blk-device,drive=target"], ["-netdev", "tap,id=net0,ifname=qemutap0,script=no,downscript=no"], ["-device", "virtio-net-device,netdev=net0,mac=52:54:00:56:4d:01"]]
+    timeout 300
 # THE GUEST SAYS THIS ITSELF, on the serial line, before anything else exists. It is the machine
 # saying "a kernel ran", which is the first fact this walkthrough establishes.
 

@@ -203,7 +203,7 @@ jobs:
       # `actions/checkout` fetched it into `$GITHUB_WORKSPACE` before any of this, which the engine
       # checkout then replaced - so it is fetched ONCE MORE, into its own directory, and copied over.
       #
-      # THE WALKTHROUGHS, THE ROOTFS SCRIPTS AND `shapes/`, AND NOTHING ELSE. Copying the engine's own
+      # THE WALKTHROUGHS AND THE ROOTFS SCRIPTS, AND NOTHING ELSE. Copying the engine's own
       # directories back over themselves is what a `for d in */` loop did on the first attempt, and it
       # copied `cmd/` over `cmd/` while the walkthroughs were never on disk at all.
       - name: lay this repository over the engine
@@ -218,13 +218,6 @@ jobs:
           git -c "http.https://github.com/.extraheader=Authorization: basic $(printf 'x-access-token:%s' "${{ github.token }}" | base64 -w0)" \
             clone --quiet --depth 1 \
             "https://github.com/${GITHUB_REPOSITORY}.git" /tmp/walkthroughs
-          # `shapes/` IS NOT COPIED HERE, AND THIS JOB DOES NOT NEED IT. It builds a ROOT FILESYSTEM -
-          # a nixos generation on ext4 - and never starts a daemon, so no machine shape is read. The
-          # copy that used to be in this loop went into the repository root, where `go:embed` does not
-          # look (`internal/machine/shapes/*.yaml` is the path it reads), so it was never compiled in.
-          #
-          # THE JOBS THAT DO BOOT A GUEST copy `shapes/` into the daemon's work directory and pass
-          # `--shapes`; see `alpine-microvm.yml` and `microvm-boot.yml`.
           for d in /tmp/walkthroughs/*/ /tmp/walkthroughs/.github/; do
             if [ -e "$d" ]; then cp -a "$d" "$GITHUB_WORKSPACE/"; fi
           done
@@ -264,7 +257,7 @@ jobs:
         run: |
           set -eu
           cd "$GITHUB_WORKSPACE"
-          git add -N shapes nixos-microvm 2>/dev/null || git add -N .
+          git add -N .
           git status --short | head -20
 
       - name: build the four files
