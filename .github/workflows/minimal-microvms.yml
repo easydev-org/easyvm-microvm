@@ -1,0 +1,110 @@
+name: minimal-microvms
+
+# EVERY MINIMAL MICROVM BOOTS TO A LOGIN - ONE FILE, SIX DISTRIBUTIONS.
+#
+# WHAT THIS ADDS: `alpine-microvm.yml` proves alpine and `nixos-microvm.yml` proves nixos, and the
+# other five minimal root filesystems - debian, fedora, ubuntu, leap, arch - have been built and
+# published for weeks with NOTHING that boots them in CI. A rootfs that builds is not a rootfs that
+# starts, and the difference is the whole reason these files exist:
+#
+#	debian 6.12   CONFIG_VIRTIO_MMIO=m and CMDLINE_DEVICES is not set, so the guest needs `acpi=on`
+#	              and a different machine type from alpine's
+#	fedora        boots through a kernel the release's own repos do not ship
+#	leap          the initramfs has to carry virtio_blk or the disk is never claimed
+#
+# Each of those was found by booting one, which is what this workflow does for all five on every run.
+#
+# WHAT IT DOES NOT DO: it makes no disk and publishes nothing. The `console.walk` of each guest needs
+# exactly the three files `microvm-rootfs.yml` publishes under `rootfs-<distro>-minimal`, so `out:` is
+# empty and the artifacts are the recordings.
+#
+# ONE ASSET, THREE FILES. `microvm-rootfs.yml` packs `debian-vmlinuz debian-initramfs debian.qcow2`
+# into ONE tar under ONE tag, because the registry stores a layer per tag and three tags would be
+# three pulls. `stage.yml` unpacks that tar into the work directory and renames only when it added a
+# single member - here it adds three, whose names are already the ones the walk asks for, so nothing
+# has to be renamed.
+#
+# THE TUN ASSERTIONS ALPINE CARRIES ARE NOT REPEATED HERE. They belong to `alpine-microvm.yml` because
+# that file is about the relay; this one is about "does the guest reach a login", and a copy of the
+# relay checks in five more places would be five more things to keep in step.
+
+on:
+  workflow_dispatch:
+    inputs:
+      only:
+        description: >-
+          one distribution to run, by name (debian, fedora, ubuntu, leap, arch), or empty for all.
+        default: ""
+      disks_repository:
+        description: "the ghcr repository that holds the root filesystems"
+        default: "easydev-org/easyvm-microvm"
+
+concurrency:
+  group: minimal-microvms
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+  checks: write
+
+jobs:
+  boot:
+    # A MATRIX ROW PER GUEST, SO A FAILURE NAMES WHICH ONE.
+    #
+    # ALL SEVEN MINIMAL ROOT FILESYSTEMS, INCLUDING THE TWO THAT ALREADY HAVE A WORKFLOW OF THEIR OWN.
+    # `alpine-microvm.yml` and `nixos-microvm.yml` are about more than a login: the first proves the
+    # UDP relay's tun device, the second builds inside a `nixos/nix` container because the rootfs needs
+    # a nix store. Neither is a plain "does this minimal rootfs reach a login", so both are here as
+    # well - and running one twice costs minutes, while a rootfs that only boots when somebody
+    # remembers to run its own workflow is a rootfs nobody finds out about.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # THE ASSET IS NAMED ON EVERY ROW RATHER THAN DERIVED. A `format()` in the JSON below
+          # would be an expression inside a string that the workflow cannot check, and the six that
+          # share a naming convention are not worth the one that does not.
+          - distro: alpine
+            timeout: 30
+            asset: rootfs-alpine-minimal:alpine-rootfs.tar
+          - distro: debian
+            timeout: 30
+            asset: rootfs-debian-minimal:debian-rootfs.tar
+          - distro: fedora
+            timeout: 30
+            asset: rootfs-fedora-minimal:fedora-rootfs.tar
+          - distro: ubuntu
+            timeout: 30
+            asset: rootfs-ubuntu-minimal:ubuntu-rootfs.tar
+          - distro: leap
+            timeout: 30
+            asset: rootfs-leap-minimal:leap-rootfs.tar
+          - distro: arch
+            timeout: 30
+            asset: rootfs-arch-minimal:arch-rootfs.tar
+          # NIXOS IS THE ONE THAT DOES NOT FOLLOW THE NAMING. Its tar holds `nixos-kernel`,
+          # `nixos-initrd` and `nixos-rootfs.qcow2` rather than `<distro>-vmlinuz`,
+          # `<distro>-initramfs` and `<distro>.qcow2` - see the `tar -cf` in nixos-microvm.yml.
+          - distro: nixos
+            timeout: 40
+            asset: rootfs-nixos-minimal:nixos-rootfs.tar
+    uses: easydev-org/easyvm/.github/workflows/stage.yml@v0.0.3-dev
+    secrets: inherit
+    with:
+      image_repository: easydev-org/easyvm
+      image_tag: v0.0.3-dev
+      disk_gb: "12"
+      group: minimal-${{ matrix.distro }}
+      disks_repository: ${{ inputs.disks_repository }}
+      stages: |
+        [
+          {
+            "name": "microvm-${{ matrix.distro }}-console",
+            "file": "${{ matrix.distro }}-microvm/steps/console.walk",
+            "pull": "",
+            "assets": ["${{ matrix.asset }}"],
+            "out": "",
+            "timeout": ${{ matrix.timeout }}
+          }
+        ]
