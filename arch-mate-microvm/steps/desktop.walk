@@ -29,9 +29,6 @@ step "boot as a microvm from kernel \"arch-vmlinuz\" and initramfs \"arch-initra
   boot
     machine "microvm,accel=kvm,acpi=on,pic=on,rtc=on,pcie=on,graphics=off"
     args [["-m", "1536"], ["-chardev", "socket,id=qga0,path={{work}}/qga.sock,server=on,wait=off"], ["-device", "isa-serial,chardev=qga0"], ["-device", "virtio-gpu-pci,xres=1024,yres=768"], ["-audiodev", "none,id=snd0"], ["-device", "ich9-intel-hda"], ["-device", "hda-duplex,audiodev=snd0"], ["-drive", "file={{disk}},if=none,format=qcow2,id=target{{discard}}"], ["-device", "virtio-blk-device,drive=target"], ["-netdev", "tap,id=net0,ifname=qemutap0,script=no,downscript=no"], ["-device", "virtio-net-device,netdev=net0,mac=52:54:00:56:4d:01"], ["-kernel", "{{work}}/arch-vmlinuz"], ["-initrd", "{{work}}/arch-initramfs"], ["-append", "console=ttyS0 root=/dev/vda rw rootfstype=ext4"]]
-    kernel arch-vmlinuz
-    initrd arch-initramfs
-    kernel_append "console=ttyS0 root=/dev/vda rw rootfstype=ext4"
     timeout 240
 # THE KERNEL FOUND THE DISK AND USERSPACE STARTED.
 step "the console will say \"login\""
