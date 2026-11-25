@@ -1690,7 +1690,29 @@ DWALL
 		lxqt)     SESSION_EXEC=/usr/bin/startlxqt ;;
 		mate)     SESSION_EXEC=/usr/bin/mate-session ;;
 		i3)       SESSION_EXEC=/usr/bin/i3 ;;
-		deepin)   SESSION_EXEC=/usr/bin/dde-session ;;
+		# DEEPIN'S SESSION IS THREE PIECES AND dde-session STARTS NONE OF THE LAST TWO.
+		#
+		# MEASURED in the guest, after the dbus-run-session fix made desktop.service stay up:
+		# `dde-session` was running, and the frame was still mean 0.0000. What it starts is not a
+		# window manager on this image - `xprop -root _NET_SUPPORTING_WM_CHECK` answered "no such
+		# atom on any window", so nothing owned the screen - and no shell drew a panel.
+		#
+		#	mode                          _NET_SUPPORTING_WM_CHECK   frame
+		#	kwin_x11 (default)            absent                     0.0000
+		#	kwin_x11 --no-compositing     window id 0x200008          0.0000   (WM, but drew nothing)
+		#	+ dde-shell                   window id 0x200008          66.1697  spread 105.0475
+		#
+		# SO `--no-compositing` IS REQUIRED. kwin_x11 with compositing never took the WM selection
+		# on this server: it stayed alive for 12 s printing one line and owning nothing, which is
+		# what a compositor waiting for an OpenGL context that never arrives looks like. This guest
+		# has no virgl, and glamor is refused on llvmpipe (see the note in the session block), so
+		# the compositor path cannot work here - but the WINDOW MANAGER path does not need it.
+		#
+		# AND SOMETHING HAS TO DRAW. MEASURED on the same guest: `xsetroot -solid '#00ff00'`
+		# returned 0 and the frame stayed 0.0000. A window manager alone paints nothing, and
+		# qemu's virtio-gpu only receives a frame when a client actually draws into it. dde-shell
+		# paints the panel, and the frame appears - the DDE dock, the tray, the power menu.
+		deepin)   SESSION_EXEC="/usr/bin/kwin_x11 --replace --no-compositing & /usr/bin/dde-shell & wait" ;;
 		# THE X11 SESSION OF A DUAL-STACK DESKTOP. MEASURED from their own xsessions entries:
 		# qtile's is `Exec=qtile start` and enlightenment's is `enlightenment_start`. Without
 		# these two lines both names fall through to the Wayland branch and the X11 copy of a
