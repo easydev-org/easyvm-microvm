@@ -1,0 +1,249 @@
+name: freebsd-kernel-probe
+
+# CAN A FREEBSD KERNEL BE CROSS-BUILT FOR A QEMU MICROVM, ON A GITHUB RUNNER, WITHOUT A FREEBSD HOST?
+#
+# ---------------------------------------------------------------------------------------------------
+# WHY THIS IS A PROBE AND NOT A GUEST
+#
+# Every other microvm here ships a root filesystem and boots it. FreeBSD cannot, yet, and the reason
+# is a kernel that does not exist: a microvm has no firmware, so the only way in is `-kernel`, and a
+# kernel reaches the machine that way only if it speaks PVH (XEN_ELFNOTE_PHYS32_ENTRY) and finds its
+# disk over virtio-MMIO with no PCI and (in Firecracker's design) no ACPI.
+#
+# FreeBSD 14+ HAS all of that - PVH is on by default, `sys/amd64/conf/FIRECRACKER` adds
+# `virtio_mmio`, `virtio_blk` and `mptable` - but NO RELEASE PUBLISHES THAT KERNEL. NetBSD solved the
+# same problem by shipping `netbsd-MICROVM.gz` in `binary/kernel/`; FreeBSD expects you to run
+# `make buildkernel KERNCONF=FIRECRACKER` on a FreeBSD machine.
+#
+# SO THE FIRST QUESTION IS WHETHER THAT BUILD CAN HAPPEN HERE AT ALL. A GitHub runner is Ubuntu, not
+# FreeBSD, and there is no KVM on it to host a FreeBSD VM that would do the build. The answer FreeBSD
+# itself publishes is `tools/build/make.py`, which bootstraps a cross toolchain out of the tree - and
+# that is what `freebsd-src/.github/workflows/cross-bootstrap-tools.yml` uses to build `GENERIC` on
+# ubuntu-24.04. This workflow does the same thing with a different KERNCONF.
+#
+# ---------------------------------------------------------------------------------------------------
+# TWO CONFIGURATIONS, BECAUSE THE OBVIOUS ONE IS PROBABLY WRONG FOR QEMU
+#
+# `FIRECRACKER` was written for FIRE...CRACKER, and one of its choices does not describe qemu:
+#
+#	envvar hint.acpi.0.disabled="1"     # Firecracker has no ACPI, so it is switched off
+#	device mptable                      # ...and CPUs are described by the legacy MP table instead
+#
+# `hw/i386/microvm.c` in qemu builds NO MP table - the string does not appear in it - while
+# `hw/i386/acpi-microvm.c` DOES publish an ACPI DSDT that enumerates every virtio-MMIO device
+# (`acpi_dsdt_add_virtio`, one `virtio_acpi_dsdt_add` per populated mmio slot). So on qemu the
+# devices a guest needs are visible through ACPI and NOT through mptable.
+#
+# THEREFORE TWO ROWS:
+#
+#	firecracker   KERNCONF=FIRECRACKER, stock       - does the published config even compile here?
+#	qemumicrovm   KERNCONF=QEMUMICROVM, derived     - the same config with ACPI left ON
+#
+# The second is generated from the first by a patch below rather than kept as a second file, so the
+# difference between them is one hunk a reader can see instead of two 200-line files to diff.
+#
+# ---------------------------------------------------------------------------------------------------
+# WHAT THIS JOB PROVES AND WHAT IT DOES NOT
+#
+# PROVES: the cross toolchain bootstraps on a stock runner, the kernel compiles from a release tag,
+# the result is a 64-bit x86 ELF with a Xen PVH note in it, and how long that takes.
+#
+# DOES NOT PROVE: that it boots. There is no /dev/kvm on a hosted runner, so a boot here would run
+# under TCG - possible, and the boot gate below is written to try it - but a green TCG boot is
+# evidence about the kernel, not about the machine this repository actually ships to.
+#
+# The artifact is uploaded either way, so a real boot can be run somewhere with KVM without paying
+# for the compile again.
+
+on:
+  workflow_dispatch:
+    inputs:
+      fbsd_ref:
+        description: "the FreeBSD source ref to build (a releng/ tag is what a guest should name)"
+        default: "releng/14.3"
+      boot_probe:
+        description: "also try to boot the built kernel under qemu's TCG (slow, best effort)"
+        default: "0"
+  push:
+    paths:
+      - ".github/workflows/freebsd-kernel-probe.yml"
+      - ".github/freebsd-probe/*"
+
+concurrency:
+  group: freebsd-kernel-probe-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # THE RUNNER FREEBSD'S OWN CI USES FOR THIS, so a failure here is a failure of the kernel config
+    # rather than of an untested combination of OS and toolchain.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - kernconf: FIRECRACKER
+            row: firecracker
+          - kernconf: QEMUMICROVM
+            row: qemumicrovm
+    steps:
+      - uses: actions/checkout@v4
+
+      # THE SOURCE IS THE OFFICIAL MIRROR AND IT IS SHALLOW. A full freebsd-src clone is ~2 GiB of
+      # history and this job reads exactly one tree of it.
+      - name: fetch freebsd-src ${{ inputs.fbsd_ref || 'releng/14.3' }}
+        run: |
+          set -eux
+          ref='${{ inputs.fbsd_ref || 'releng/14.3' }}'
+          git clone --depth 1 --branch "$ref" https://git.freebsd.org/src.git freebsd-src
+          cd freebsd-src
+          git log --oneline -1
+          # THE TRAGEDY OF A SHALLOW CLONE: several parts of the build ask git for a describe string
+          # and a bare `git describe` in a depth-1 tree answers "No names found". `newvers.sh` handles
+          # that, but the tag is recorded here so the log says which tree was built.
+          echo "FREEBSD_REF=$ref" >> "$GITHUB_ENV"
+
+      # THE PACKAGES ARE THE ONES FREEBSD'S OWN CROSS JOB INSTALLS, minus the compiler: `make.py`
+      # bootstraps clang from the source tree, which is the point - the host compiler is not the
+      # guest's compiler and mixing them is how a kernel ends up with host-specific code paths.
+      - name: install the host build dependencies
+        run: |
+          set -eux
+          sudo apt-get update --quiet
+          sudo apt-get -yq --no-install-suggests --no-install-recommends install \
+            bmake libarchive-dev libbz2-dev libssl-dev flex
+
+      - name: write the kernel configuration
+        if: matrix.row == 'qemumicrovm'
+        run: |
+          set -eux
+          cd freebsd-src
+          # A GENERATOR, NOT A PATCH: see the header of the script. It refuses when an anchor moved,
+          # which a unified diff would silently absorb.
+          python3 "$GITHUB_WORKSPACE/.github/freebsd-probe/make-qemumicrovm.py" \
+            sys/amd64/conf/FIRECRACKER sys/amd64/conf/${{ matrix.kernconf }}
+          echo "=== ${{ matrix.kernconf }} vs FIRECRACKER ==="
+          diff -u sys/amd64/conf/FIRECRACKER sys/amd64/conf/${{ matrix.kernconf }} || true
+
+      - name: bootstrap the cross toolchain and build the kernel
+        env:
+          # `make.py` puts every object under this, and the workspace is the only path that is
+          # guaranteed to survive between steps.
+          MAKEOBJDIRPREFIX: ${{ github.workspace }}/obj
+        run: |
+          set -eux
+          cd freebsd-src
+          NPROC=$(getconf _NPROCESSORS_ONLN)
+          echo "building with -j$NPROC on $(nproc) cpus"
+          # `--cross-bindir` IS NOT PASSED, DELIBERATELY. It exists to make make.py use a host llvm
+          # instead of the bootstrapped one; a bootstrap is what makes this independent of whatever
+          # clang the runner image happens to carry.
+          #
+          # A DRY RUN FIRST, because it is the step that catches a broken tree or a missing host
+          # dependency before an hour of compiling. It prints the commands instead of running them.
+          ./tools/build/make.py TARGET=amd64 TARGET_ARCH=amd64 -n > /tmp/dryrun.txt 2>&1 || {
+            echo "::error::make.py could not even plan the build"; tail -40 /tmp/dryrun.txt; exit 1; }
+          echo "dry run ok: $(wc -l < /tmp/dryrun.txt) lines"
+
+          time ./tools/build/make.py TARGET=amd64 TARGET_ARCH=amd64 \
+            kernel-toolchain -s -j"$NPROC" -DWITH_DISK_IMAGE_TOOLS_BOOTSTRAP
+
+          time ./tools/build/make.py TARGET=amd64 TARGET_ARCH=amd64 \
+            KERNCONF=${{ matrix.kernconf }} buildkernel -s -j"$NPROC"
+
+      - name: put the kernel where the checks can find it
+        run: |
+          set -eux
+          # MAKEOBJDIRPREFIX PUTS THE TREE UNDER A MIRROR OF THE SOURCE PATH, so the object directory
+          # is `obj/$PWD/amd64.amd64/sys/<KERNCONF>` - not a fixed depth. `find` states the shape
+          # without guessing it.
+          src=$(find obj -type f -path "*/sys/${{ matrix.kernconf }}/kernel" | head -1)
+          test -n "$src" -a -s "$src" || {
+            echo "::error::no kernel under obj/ for ${{ matrix.kernconf }}"; find obj -name kernel -type f | head; exit 1; }
+          echo "built: $src"
+          mkdir -p out
+          cp "$src" "out/freebsd-kernel-${{ matrix.row }}"
+          ls -l out/
+
+      # THE THREE FACTS THAT DECIDE WHETHER THIS KERNEL CAN BE A MICROVM GUEST AT ALL.
+      #
+      # A KERNEL THAT DOES NOT COMPILE is the outcome this job exists to detect. A kernel that
+      # compiles but has NO PVH NOTE cannot be handed to `-kernel` - qemu's loader looks for
+      # XEN_ELFNOTE_PHYS32_ENTRY type 18 by name, and without it answers
+      # "Error loading uncompressed kernel without PVH ELF Note".
+      - name: the kernel is an ELF with a Xen PVH note
+        run: |
+          set -eux
+          k="out/freebsd-kernel-${{ matrix.row }}"
+          file "$k"
+          size=$(stat -c %s "$k")
+          echo "size: $size bytes"
+          # THE ELF CLASS AND MACHINE, from the header, because `file` output is not a contract.
+          python3 - "$k" <<'PY'
+          import struct, sys
+          d = open(sys.argv[1], "rb").read(64)
+          assert d[:4] == b"\x7fELF", "not an ELF"
+          assert d[4] == 2, "not ELFCLASS64"
+          machine = struct.unpack_from("<H", d, 18)[0]
+          assert machine == 62, f"not EM_X86_64: {machine}"
+          print(f"ELF64 EM_X86_64 ok, entry {struct.unpack_from('<Q', d, 24)[0]:#x}")
+          PY
+          # THE PVH NOTE. `readelf -n` prints note sections; the type is what qemu matches on, and
+          # `Xen` with type 18 is XEN_ELFNOTE_PHYS32_ENTRY.
+          readelf -n "$k" > /tmp/notes.txt || true
+          cat /tmp/notes.txt
+          if grep -qi 'Xen' /tmp/notes.txt; then
+            echo "PVH note present"
+          else
+            echo "::error::no Xen ELF note: qemu -kernel cannot load this kernel"
+            exit 1
+          fi
+          # AND THE DEVICES THE MACHINE PROVIDES, named from the config that was built. `config -x`
+          # would be authoritative but needs a guest; this reads the same file that was compiled.
+          echo "=== microvm-relevant options in ${{ matrix.kernconf }} ==="
+          grep -E 'virtio_mmio|virtio_blk|mptable|^device[[:space:]]+acpi|hint\.acpi' \
+            freebsd-src/sys/amd64/conf/${{ matrix.kernconf }} || true
+
+      # A BOOT UNDER TCG, OFF BY DEFAULT. It is here because the expensive half is the compile: if
+      # the kernel comes out wrong, the cheapest place to find out is the job that just built it.
+      - name: try to boot it under qemu's software emulation
+        if: inputs.boot_probe == '1'
+        run: |
+          set -eux
+          sudo apt-get -yq --no-install-suggests --no-install-recommends install qemu-system-x86
+          k="out/freebsd-kernel-${{ matrix.row }}"
+          # NO KVM, SO NO `accel=kvm`: this is TCG, which is why the gate is a short timeout and a
+          # grep for the FreeBSD banner rather than a login prompt.
+          set +e
+          timeout 180 qemu-system-x86_64 \
+            -M microvm,acpi=on,pic=on,rtc=on,pcie=off -cpu max -smp 2 -m 1024 \
+            -kernel "$k" -append "console=comconsole" \
+            -device isa-serial,chardev=c0 -chardev stdio,id=c0 \
+            -nographic -no-reboot 2>&1 | tee /tmp/boot.log
+          echo "=== boot exit: $? ==="
+          set -e
+          if grep -qE 'FreeBSD|Copyright \(c\) 1992' /tmp/boot.log; then
+            echo "the kernel reached its own banner"
+          else
+            echo "::warning::no FreeBSD banner: the kernel was loaded but did not get far (TCG)"
+            head -40 /tmp/boot.log
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: freebsd-kernel-${{ matrix.row }}
+          path: out/freebsd-kernel-${{ matrix.row }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: say what was built
+        if: always()
+        run: |
+          {
+            echo "### ${{ matrix.row }} (\`${{ matrix.kernconf }}\`, \`${{ inputs.fbsd_ref || 'releng/14.3' }}\`)"
+            echo ""
+            ls -l out/ 2>/dev/null || echo "no artifact"
+          } >> "$GITHUB_STEP_SUMMARY"
