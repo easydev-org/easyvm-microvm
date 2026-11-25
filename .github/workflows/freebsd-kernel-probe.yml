@@ -183,68 +183,88 @@ jobs:
           cp "$src" "out/freebsd-kernel-${{ matrix.row }}"
           ls -l out/
 
-      # THE THREE FACTS THAT DECIDE WHETHER THIS KERNEL CAN BE A MICROVM GUEST AT ALL.
+      # THE FIRST FACT: CAN qemu LOAD AND ENTER THIS KERNEL AT ALL.
       #
-      # A KERNEL THAT DOES NOT COMPILE is the outcome this job exists to detect. A kernel that
-      # compiles but has NO PVH NOTE cannot be handed to `-kernel` - qemu's loader looks for
-      # XEN_ELFNOTE_PHYS32_ENTRY type 18 by name, and without it answers
-      # "Error loading uncompressed kernel without PVH ELF Note".
-      - name: the kernel is an ELF with a Xen PVH note
+      # MEASURED on run 45628881466, both rows: the kernel builds from a release tag on a stock
+      # ubuntu runner in about nine minutes, is 15.9 MB, ELF64 EM_X86_64, and carries
+      # XEN_ELFNOTE_PHYS32_ENTRY - so qemu's loader can enter it.
+      #
+      # THAT IS NOT THE SAME AS "IT BOOTS", AND THE COUNTEREXAMPLE IS ALREADY IN THIS REPO.
+      # `netbsd-GENERIC` has the identical note and does not boot on a microvm: the note says
+      # where to jump, not that the machine is there. What made netbsd-MICROVM boot is what it
+      # was BUILT with - virtio_mmio, virtio_blk and its filesystems compiled in. This check is
+      # therefore a gate on the header only; the boot gate below is what answers the rest.
+      #
+      # IT IS A PARSER AND NOT A GREP, AND THAT IS A CORRECTION. The first version was
+      # `grep -qi 'Xen' notes.txt`, which matches GUEST_OS, GUEST_VERSION, XEN_VERSION, VIRT_BASE
+      # and a dozen other notes qemu never reads - so it passes on a kernel with no PVH entry.
+      - name: the kernel speaks a boot protocol qemu -kernel implements
         run: |
           set -eux
           k="out/freebsd-kernel-${{ matrix.row }}"
           file "$k"
-          size=$(stat -c %s "$k")
-          echo "size: $size bytes"
-          # THE ELF CLASS AND MACHINE, from the header, because `file` output is not a contract.
-          python3 - "$k" <<'PY'
-          import struct, sys
-          d = open(sys.argv[1], "rb").read(64)
-          assert d[:4] == b"\x7fELF", "not an ELF"
-          assert d[4] == 2, "not ELFCLASS64"
-          machine = struct.unpack_from("<H", d, 18)[0]
-          assert machine == 62, f"not EM_X86_64: {machine}"
-          print(f"ELF64 EM_X86_64 ok, entry {struct.unpack_from('<Q', d, 24)[0]:#x}")
-          PY
-          # THE PVH NOTE. `readelf -n` prints note sections; the type is what qemu matches on, and
-          # `Xen` with type 18 is XEN_ELFNOTE_PHYS32_ENTRY.
-          readelf -n "$k" > /tmp/notes.txt || true
-          cat /tmp/notes.txt
-          if grep -qi 'Xen' /tmp/notes.txt; then
-            echo "PVH note present"
-          else
-            echo "::error::no Xen ELF note: qemu -kernel cannot load this kernel"
-            exit 1
-          fi
+          python3 "$GITHUB_WORKSPACE/.github/freebsd-probe/check-kernel.py" "$k"
           # AND THE DEVICES THE MACHINE PROVIDES, named from the config that was built. `config -x`
           # would be authoritative but needs a guest; this reads the same file that was compiled.
           echo "=== microvm-relevant options in ${{ matrix.kernconf }} ==="
           grep -E 'virtio_mmio|virtio_blk|mptable|^device[[:space:]]+acpi|hint\.acpi' \
             freebsd-src/sys/amd64/conf/${{ matrix.kernconf }} || true
 
-      # A BOOT UNDER TCG, OFF BY DEFAULT. It is here because the expensive half is the compile: if
-      # the kernel comes out wrong, the cheapest place to find out is the job that just built it.
+      # A BOOT UNDER TCG, WHICH IS THE ONLY HONEST GATE - AND IT IS NOT "A BANNER APPEARED".
+      #
+      # MEASURED, as a control against two kernels whose answers were already known:
+      #
+      #	netbsd-MICROVM   banner, then mounts its root and reaches a prompt     boots
+      #	netbsd-GENERIC   banner, then `unknown device major 0xffff...` forever  does NOT
+      #
+      # BOTH PRINT A BANNER. A gate that greps for "FreeBSD" or "Copyright (c) 1992" therefore
+      # passes both and measures nothing - it would certify a kernel that cannot find a disk. The
+      # real question for a microvm is whether the kernel FINDS ITS VIRTIO-MMIO DEVICES, because
+      # that is the whole difference between a kernel built for this machine and one built for a
+      # PCI machine that is not there.
+      #
+      # SO THE VERDICT IS ON THE DEVICE PROBE, and the console is dumped either way so a failure
+      # is diagnosable from the log alone.
       - name: try to boot it under qemu's software emulation
         if: inputs.boot_probe == '1'
         run: |
           set -eux
           sudo apt-get -yq --no-install-suggests --no-install-recommends install qemu-system-x86
           k="out/freebsd-kernel-${{ matrix.row }}"
-          # NO KVM, SO NO `accel=kvm`: this is TCG, which is why the gate is a short timeout and a
-          # grep for the FreeBSD banner rather than a login prompt.
+          # NO KVM ON A HOSTED RUNNER, so this is TCG - slow, and about an order of magnitude
+          # slower than the machine this repository ships to. A timeout here is not evidence of a
+          # broken kernel, which is why the gate below separates "silent" from "tried to probe".
+          #
+          # `-serial stdio` WITH `-display none` AND NOT `-nographic`: MEASURED that `-nographic`
+          # already routes serial to stdio, so also giving the serial line `-chardev stdio` dies
+          # with "cannot use stdio by multiple character devices" - which both control kernels hit,
+          # and which made them look identical.
           set +e
-          timeout 180 qemu-system-x86_64 \
+          timeout 240 qemu-system-x86_64 \
             -M microvm,acpi=on,pic=on,rtc=on,pcie=off -cpu max -smp 2 -m 1024 \
             -kernel "$k" -append "console=comconsole" \
-            -device isa-serial,chardev=c0 -chardev stdio,id=c0 \
-            -nographic -no-reboot 2>&1 | tee /tmp/boot.log
-          echo "=== boot exit: $? ==="
+            -serial stdio -display none -no-reboot 2>&1 | tee /tmp/boot.log
+          echo "=== boot exit: ${PIPESTATUS[0]:-?} ==="
           set -e
-          if grep -qE 'FreeBSD|Copyright \(c\) 1992' /tmp/boot.log; then
-            echo "the kernel reached its own banner"
+          echo "--- last 30 lines ---"
+          tail -30 /tmp/boot.log || true
+          # THE THREE OUTCOMES, NAMED, BECAUSE "IT FAILED" IS NOT A FINDING:
+          #
+          #	reached userspace/root   a login prompt, a mount, or a shell - it boots
+          #	probed and could not      it looked for devices and found none - the netbsd-GENERIC
+          #	                          shape, which is exactly what a PCI-only kernel does here
+          #	silent                    nothing came back - it did not get entered at all
+          if grep -qE 'login:|FreeBSD/amd64|mountroot>' /tmp/boot.log; then
+            echo "VERDICT: reached userspace"
+          elif grep -qE 'unknown device major|no disks|Can.t find|Mounting from' /tmp/boot.log; then
+            echo "::error::VERDICT: the kernel ran but could not find its virtio-MMIO devices"
+            echo "::error::that is the netbsd-GENERIC shape: built for a PCI machine, not this one"
+            exit 1
+          elif [ -s /tmp/boot.log ]; then
+            echo "VERDICT: output but no device probe - read the dump above"
           else
-            echo "::warning::no FreeBSD banner: the kernel was loaded but did not get far (TCG)"
-            head -40 /tmp/boot.log
+            echo "::error::VERDICT: no output at all, so qemu never entered the kernel"
+            exit 1
           fi
 
       - uses: actions/upload-artifact@v4
