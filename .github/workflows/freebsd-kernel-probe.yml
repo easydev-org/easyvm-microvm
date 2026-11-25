@@ -136,6 +136,9 @@ jobs:
         run: |
           set -eux
           cd freebsd-src
+          # `make.py` REFUSES A MAKEOBJDIRPREFIX THAT DOES NOT EXIST YET: it answers
+          # "Chosen MAKEOBJDIRPREFIX=... doesn't exist!" and exits 1. It does not create it.
+          mkdir -p "$MAKEOBJDIRPREFIX"
           NPROC=$(getconf _NPROCESSORS_ONLN)
           echo "building with -j$NPROC on $(nproc) cpus"
           # `--cross-bindir` IS NOT PASSED, DELIBERATELY. It exists to make make.py use a host llvm
