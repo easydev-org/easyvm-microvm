@@ -1,0 +1,107 @@
+# A NETBSD MICROVM WITH NO DESKTOP: A BUILT ROOT FILESYSTEM, A SERIAL LOGIN, NO PCIe.
+#
+# THIS IS THE FIRST BSD ON A MICROVM, AND NETBSD IS THE ONE THAT SHIPS A KERNEL FOR IT.
+#
+# A microvm has no firmware to read a boot sector, so the ONLY way in is `-kernel`, and a kernel
+# reaches the machine that way only if it speaks a boot protocol qemu implements. Two were measured:
+#
+#	netbsd-GENERIC     ELF, and it has NO `HdrS` signature at 0x202 - it is not a Linux-protocol
+#	                   kernel and qemu cannot load it. MEASURED: `-kernel netbsd-GENERIC` loops on
+#	                   `Booting from ROM..` printing SeaBIOS forever and never reaches NetBSD.
+#	netbsd-MICROVM     built with the MICROVM config: PVH, virtio-MMIO, `acpi=off,pic=off`. It IS
+#	                   in the official 11.1 release, in the same `binary/kernel/` directory as
+#	                   GENERIC - `netbsd-MICROVM.gz`, 1.6 MiB compressed.
+#
+# THE SECOND FACT IS THE ONE WORTH WRITING DOWN. The NetBSD wiki's own microvm page and the smolBSD
+# project both describe BUILDING this kernel with `./build.sh ... kernel=MICROVM`, and the NetBSD
+# 11.0 release notes introduce the MICROVM configuration as new. What neither says plainly is that
+# the release publishes a prebuilt one, so this guest needs no toolchain: it downloads a 1.6 MiB
+# kernel, not a cross-compiled tree.
+#
+# NOTHING HERE INSTALLS NETBSD, AND THE DISK IS NOT AN INSTALLER IMAGE. `.github/netbsd-rootfs.sh`
+# unpacks the official `base` and `etc` sets into a 254 MiB tree and writes that tree into a 2 GiB
+# ext2 image with `mke2fs -d` - the same shape Firecracker's getting-started guide uses for Linux,
+# and the same shape every other microvm here uses. The 536 MiB official LIVE image was measured to
+# boot too, and is NOT used: a test that boots a shipped image proves the image, not the build.
+#
+# THE ASSERTION IS THE SERIAL LINE, NOT A SCREEN. There is no framebuffer on this machine - a GPU
+# needs PCIe, and `pcie=off` means there is none - so the recording is the "NO DISPLAY" card the
+# recorder draws while a guest has no adapter.
+walkthrough "netbsd microvm - a PVH kernel, a built root filesystem, a serial login, and no PCIe"
+resolution 1024x768
+recording_resolution 1024x768
+# THE TWO FILES THE CI STEP PRODUCES, named here so the boot step can refer to them.
+step "needs netbsd-MICROVM netbsd.qcow2"
+  needs [netbsd-MICROVM, netbsd.qcow2]
+
+step "disk netbsd.qcow2"
+  disk netbsd.qcow2
+
+# `root=ld0a` AND NOT `root=dk1`, BECAUSE THIS DISK HAS NO PARTITION TABLE.
+#
+# THE TWO IMAGES NAME THEIR ROOT DIFFERENTLY AND BOTH ARE RIGHT FOR THEIR OWN DISK. The official
+# live image is GPT-partitioned, so its root is `dk1` and `root=ld0a` answers
+#
+#	no file system for ld0 (dev 0x1300)
+#	cannot mount root, error = 79
+#
+# The image this walk boots was written with `mke2fs -d` straight onto the whole image, so the
+# filesystem IS the disk and `ld0a` is its disklabel partition - the same `root=/dev/vda` shape the
+# alpine, debian and arch microvms use.
+#
+# `console=com` IS `com0`, the isa-serial line the engine's `-chardev socket` writes to. `rw` asks
+# for the root read-write; `-z` keeps the kernel from probing serial ports that are not there.
+step "boot as a microvm from kernel \"netbsd-MICROVM\" with \"root=ld0a console=com rw -z\" without a display with memory 1024, waiting up to 180s"
+  boot
+    machine "microvm,accel=kvm,acpi=off,pic=off,rtc=on,pcie=off,graphics=off"
+    args [["-cpu", "Skylake-Client-v4"], ["-smp", "2"], ["-m", "1024"], ["-chardev", "socket,id=qga0,path=qga.sock,server=on,wait=off"], ["-device", "isa-serial,chardev=qga0"], ["-drive", "file=netbsd.qcow2,if=none,format=qcow2,discard=unmap,id=target"], ["-device", "virtio-blk-device,drive=target"], ["-global", "virtio-mmio.force-legacy=false"], ["-kernel", "netbsd-MICROVM"], ["-append", "root=ld0a console=com rw -z"]]
+    timeout 180
+
+# THE FIRST FACT: IT IS THE MICROVM KERNEL AND IT BOOTED THROUGH PVH.
+#
+# MEASURED on the serial line:
+#
+#	NetBSD 11.1 (MICROVM)           Notice: this software is protected by copyright
+#	[   1.0218731] kernel boot time: 335ms
+#
+# The string names the CONFIGURATION, so a kernel built from GENERIC cannot satisfy this even if it
+# somehow booted - and that is the distinction this guest is about.
+step "the console will say \"NetBSD 11.1 (MICROVM)\""
+  until "NetBSD 11.1 (MICROVM)"
+  from console
+  timeout 180
+
+# AND THE SECOND: userspace finished, and it finished ON A READ-WRITE ROOT.
+#
+# THE PROMPT IS `vmuser@netbsd$` AND NOT `login:`, because the guest autologs. `gettytab`'s `al`
+# capability is BSD getty's own auto-login, so `/etc/ttys` runs `getty autologin` on `constty` and
+# the guest arrives at a shell with no password. A microvm has no keyboard device for the engine to
+# type at a prompt, so this is the same shape alpine's busybox `-l /sbin/autologin` uses.
+#
+# THAT PROMPT CANNOT BE REACHED ON A READ-ONLY ROOT, WHICH IS WHY IT IS THE ASSERTION. Reaching it
+# requires first boot to have run `pwhash`, `usermod`, `pwd_mkdb` and `ssh-keygen`, every one of
+# which writes to `/etc`. MEASURED on a filesystem whose superblock carried the error bit (0x2):
+# the same guest answered
+#
+#	/dev/ld0a on / type ext2fs (read-only, local)
+#	pwd_mkdb: Cannot open `/etc/pwd.db.tmp': Read-only file system
+#
+# and fell to a `login:` prompt nobody could answer. See `.github/netbsd-rootfs.sh` for what sets
+# the state word back to clean.
+#
+# AND THE HOMEDIR PROFILE IS WHAT PUTS THE NAME IN THE PROMPT. `PS1='vmuser@netbsd$ '` in
+# `/home/vmuser/.profile` means this string can only appear after a real login of a real account,
+# not from a bare `# ` that an unfinished boot also prints.
+step "the console will say \"vmuser@netbsd$\""
+  until "vmuser@netbsd$"
+  from console
+  timeout 180
+
+# TWENTY SECONDS OF A GUEST AT A PROMPT, so the recording is a machine that stayed up rather than
+# a boot log that scrolled past.
+step "wait 20s"
+  settle 20
+
+step "stop the machine by killing it, waiting up to 60s"
+  stop kill
+  timeout 60

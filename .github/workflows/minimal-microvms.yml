@@ -33,7 +33,8 @@ on:
     inputs:
       only:
         description: >-
-          one distribution to run, by name (debian, fedora, ubuntu, leap, arch), or empty for all.
+          one distribution to run, by name (debian, fedora, ubuntu, leap, arch, nixos, netbsd),
+          or empty for all.
         default: ""
       disks_repository:
         description: "the ghcr repository that holds the root filesystems"
@@ -89,6 +90,17 @@ jobs:
           - distro: nixos
             timeout: 40
             asset: rootfs-nixos-minimal:nixos-rootfs.tar
+          # NETBSD IS THE FIRST GUEST HERE THAT IS NOT LINUX, AND ITS TARBALL HOLDS TWO FILES.
+          #
+          #	netbsd-MICROVM   the PVH kernel, from the release's own `binary/kernel/`
+          #	netbsd.qcow2     the root filesystem, written by `mke2fs -d` from the base+etc sets
+          #
+          # NO INITRAMFS, and that is the MICROVM configuration doing its job: `virtio_mmio`,
+          # `virtio_blk` and the filesystems are built in, so the kernel reaches its disk unaided.
+          # The walk boots with `-kernel` and no `-initrd`, which the Linux rows could not do.
+          - distro: netbsd
+            timeout: 40
+            asset: rootfs-netbsd-minimal:netbsd-rootfs.tar
     uses: easydev-org/easyvm/.github/workflows/stage.yml@v0.0.4
     secrets: inherit
     with:

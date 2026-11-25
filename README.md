@@ -20,6 +20,13 @@ that CI built. 512–768 MiB of RAM instead of 4 GiB, and seconds instead of for
 | `leap-microvm/` | openSUSE Leap |
 | `nixos-microvm/` | NixOS |
 | `ubuntu-microvm/` | Ubuntu |
+| `netbsd-microvm/` | NetBSD 11.1, the first BSD here |
+
+NETBSD IS NOT LINUX AND ITS TARBALL IS DIFFERENT: `netbsd-MICROVM` (a PUBLISHED kernel built with
+NetBSD's MICROVM configuration, PVH + virtio-MMIO, so it boots with `-kernel` and no firmware) and
+`netbsd.qcow2` (a root filesystem written by `mke2fs -d` from the release's `base` and `etc` sets).
+There is no initramfs, because that kernel has `virtio_mmio`, `virtio_blk` and ext2fs built in.
+`netbsd-GENERIC` does NOT work: it has no Linux boot-protocol header, so `-kernel` loops on SeaBIOS.
 
 **Desktop variants** - a graphical session on a virtio-gpu device over PCIe, captured from the
 scanout the noVNC console exports:

@@ -53,6 +53,7 @@ on:
       - ".github/ubuntu-rootfs.sh"
       - ".github/arch-rootfs.sh"
       - ".github/leap-rootfs.sh"
+      - ".github/netbsd-rootfs.sh"
       - ".github/fetch-image.py"
       - ".github/make-initramfs.py"
       - ".github/workflows/microvm-rootfs.yml"
@@ -64,6 +65,7 @@ on:
       - ".github/ubuntu-rootfs.sh"
       - ".github/arch-rootfs.sh"
       - ".github/leap-rootfs.sh"
+      - ".github/netbsd-rootfs.sh"
       - ".github/fetch-image.py"
       - ".github/make-initramfs.py"
       - ".github/workflows/microvm-rootfs.yml"
@@ -279,6 +281,22 @@ jobs:
           - tag: rootfs-leap-minimal
             script: .github/leap-rootfs.sh
             files: "leap-vmlinuz leap-initramfs leap.qcow2"
+          # NETBSD IS THE FIRST BSD WITH TWO FILES RATHER THAN THREE, AND THAT IS NOT AN OMISSION.
+          #
+          # A Linux microvm is handed a kernel, an initramfs and a disk, because a modern Linux
+          # kernel needs the initramfs to load `virtio_mmio` before it can see the disk. NetBSD's
+          # MICROVM kernel has `virtio_mmio`, `virtio_blk`, `ext2fs` and `ffs` BUILT IN - that is
+          # what the configuration is FOR - so there is no initramfs to hand it. The kernel plus a
+          # root filesystem is the whole machine.
+          #
+          # THE KERNEL IS A PUBLISHED RELEASE ARTIFACT AND IS NOT COMPILED HERE. `netbsd-MICROVM.gz`
+          # sits in `NetBSD-<version>/amd64/binary/kernel/` beside `netbsd-GENERIC.gz`, 1.6 MiB
+          # compressed. The NetBSD wiki describes BUILDING it with `./build.sh kernel=MICROVM`; what
+          # this row records is that the release also PUBLISHES it, which is why no toolchain is
+          # needed. See the header of `.github/netbsd-rootfs.sh`.
+          - tag: rootfs-netbsd-minimal
+            script: .github/netbsd-rootfs.sh
+            files: "netbsd-MICROVM netbsd.qcow2"
     steps:
       - uses: actions/checkout@v4
 
