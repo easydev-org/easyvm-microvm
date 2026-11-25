@@ -155,6 +155,33 @@ xfce-wayland|lxqt-wayland|qtile-wayland|cinnamon-wayland) DESKTOP_FAMILY=wayland
 	;;
 esac
 
+# WHICH DESKTOPS NEED easystream AT ALL, AND WHY IT IS ONLY THREE OF THEM.
+#
+# THE SCREEN IS READ FROM THE SCANOUT NOW. `microvm_display: desktop` attaches `virtio-gpu-pci`,
+# so every desktop walk photographs the framebuffer with the harness's `read:`-`check:` pair - qemu
+# `screendump` over the VNC channel - and asserts mean brightness and spread. MEASURED on
+# arch-sway: "mean 2.7764" and "spread 5.2635", a real desktop rather than a dead frame, with no
+# capture daemon involved.
+#
+# THAT WAS NOT ALWAYS TRUE. Before the GPU was attached a microvm had no framebuffer to dump, so
+# easystream was added to read pixels out of the compositor through its own protocol and serve
+# them as `est://`. The walks still carry long comments about easystream because that is the
+# history - but for 21 of these 24 desktops nothing calls it any more.
+#
+# THE THREE THAT DO CALL IT ARE THE PLASMA SHELLS, and they call it from outside: their walk's
+# last assertion is `ssh /opt/portal-capture.sh`, a script INSIDE the image that asks the
+# easystream est server for one frame over xdg-desktop-portal and checks the mean brightness.
+# MEASURED on Plasma over virtio-gpu: "portal-capture: PASS mean=133.7 frame=1024x768". Drop
+# easystream from those and the walk has nothing to ask.
+#
+# SO THE INSTALL IS CONDITIONAL ON THE DESKTOP INSTEAD OF UNCONDITIONAL. That is the whole
+# change: the same image on the other 21 desktops no longer downloads, unpacks, links and starts
+# a capture daemon nobody reads, and the plasma three are untouched.
+NEEDS_EASYSTREAM=0
+case "$DESKTOP" in
+plasma|plasma-mobile|plasma-bigscreen) NEEDS_EASYSTREAM=1 ;;
+esac
+
 OUT="${1:-.}"
 WORK="${OUT}/arch-build"
 
@@ -577,11 +604,16 @@ rm -rf "$ROOT/var/cache/pacman/pkg"/* "$ROOT/var/log"/* 2>/dev/null || true
 # compositor with no client draws nothing, easystream with no compositor has no frames, and
 # PipeWire with no user session refuses root (`ConditionUser=!root`).
 if [ "$DESKTOP_FAMILY" != "none" ]; then
-	# --- 3b. EASYSTREAM, WHATEVER THE SESSION IS ------------------------------------------
+	# --- 3b. EASYSTREAM, FOR THE DESKTOPS THAT ASK IT FOR A FRAME -------------------------
+	#
+	# SEE $NEEDS_EASYSTREAM ABOVE FOR WHY THIS IS CONDITIONAL. On the 21 desktops whose walk
+	# reads the scanout, nothing runs easystream and nothing asks it for pixels, so it is not
+	# installed; on the plasma shells `/opt/portal-capture.sh` does exactly that.
+	if [ "$NEEDS_EASYSTREAM" = "1" ]; then
 	ES_VERSION="${EAZYSTREAM_VERSION:-v0.10.2}"
 	ES_PKG="easystream-${ES_VERSION#v}-1-x86_64.pkg.tar-arch.zst"
 	if [ ! -x "$ROOT/usr/bin/easystream" ]; then
-		log "fetching easystream ${ES_VERSION} (arch package)"
+		log "fetching easystream ${ES_VERSION} (arch package, this desktop asks it for a frame)"
 		curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors --max-time 300 \
 			-o "$WORK/$ES_PKG" \
 			"https://github.com/easydev-org/easystream/releases/download/${ES_VERSION}/${ES_PKG}"
@@ -594,6 +626,9 @@ if [ "$DESKTOP_FAMILY" != "none" ]; then
 		log "WARNING: easystream has unresolved libraries: $(chroot "$ROOT" ldd /usr/bin/easystream 2>&1 | grep 'not found' | tr '\n' ' ')"
 	else
 		log "easystream: all libraries resolve"
+	fi
+	else
+		log "easystream: not installed, this desktop's walk reads the scanout"
 	fi
 
 	# --- 3b-ii. THE KDE PORTAL'S CONSENT DIALOG, ANSWERED IN ADVANCE --------------------
@@ -1496,6 +1531,10 @@ fi
 	# with the OLD environment. start on an active unit is a no-op, so the environment set
 	# above would never be picked up - MEASURED: labwc kept answering at the default 1920x1080
 	# with zero-byte frames while the unit reported itself active.
+	# ONLY WHEN THE IMAGE HAS THE UNIT. See $NEEDS_EASYSTREAM: 21 of the 24 desktops have no
+	# easystream, and this loop would otherwise spend its full twenty seconds retrying a unit
+	# that does not exist before the desktop is allowed to be ready.
+	if [ -f /usr/lib/systemd/user/easystream.service ]; then
 	i=0
 	while [ \$i -lt 100 ]; do
 		systemctl --user restart easystream 2>/dev/null && break
@@ -1503,6 +1542,7 @@ fi
 	done
 	# Give the restarted unit a moment to attach before the desktop has to be ready.
 	sleep 3
+	fi
 ) &
 
 # THE CONSOLE MARKER, for the same measured reason as in desktop.sh: MEASURED in CI, a
@@ -1969,7 +2009,7 @@ done
 if [ -z "$WL" ]; then echo "gdm-capture: no wayland socket in 60s" >&2; exit 1; fi
 echo "gdm-capture: socket=$WL" >&2
 # push into the user manager and start the portal + capture, as vmuser
-su -s /bin/sh "$U" -c "export XDG_RUNTIME_DIR=$RUNTIME; export DBUS_SESSION_BUS_ADDRESS=unix:path=$RUNTIME/bus; systemctl --user set-environment WAYLAND_DISPLAY=$WL XDG_RUNTIME_DIR=$RUNTIME; systemctl --user start pipewire pipewire-pulse wireplumber 2>/dev/null; systemctl --user start xdg-desktop-portal xdg-desktop-portal-gnome 2>/dev/null; sleep 5; systemctl --user restart easystream 2>/dev/null"
+su -s /bin/sh "$U" -c "export XDG_RUNTIME_DIR=$RUNTIME; export DBUS_SESSION_BUS_ADDRESS=unix:path=$RUNTIME/bus; systemctl --user set-environment WAYLAND_DISPLAY=$WL XDG_RUNTIME_DIR=$RUNTIME; systemctl --user start pipewire pipewire-pulse wireplumber 2>/dev/null; systemctl --user start xdg-desktop-portal xdg-desktop-portal-gnome 2>/dev/null; sleep 5; [ -f /usr/lib/systemd/user/easystream.service ] && systemctl --user restart easystream 2>/dev/null; true"
 
 # THE CAPTURE IS THE HARNESS'S `see:`, NOT EASYSTREAM, AND THAT WAS MEASURED RATHER THAN CHOSEN.
 #
@@ -2165,10 +2205,12 @@ PORTALENV
 
 	# THE KDE CONSENT DIALOG IS ANSWERED BEFORE THE CAPTURE UNIT ASKS. A oneshot user unit
 	# writes the backend's mega-authorisation row (see 3b-ii); easystream then orders after it,
-	# so the first portal Start already finds the grant and never opens a dialog. On a
-	# non-KDE session the script finds no permission store and exits 0, which is why this is
-	# installed for every Wayland desktop rather than only the Plasma ones.
-	if [ "$DESKTOP_FAMILY" = "wayland" ]; then
+	# so the first portal Start already finds the grant and never opens a dialog.
+	#
+	# GATED ON $NEEDS_EASYSTREAM LIKE THE REST: its `Before=easystream.service` names a unit that
+	# is not in 21 of these images, and its only job is to save easystream from a dialog nobody
+	# can click. It is installed for the plasma shells, which are the ones that ask.
+	if [ "$DESKTOP_FAMILY" = "wayland" ] && [ "$NEEDS_EASYSTREAM" = "1" ]; then
 		cat > "$ROOT/etc/systemd/user/kde-mega-auth.service" <<'KAUTH'
 [Unit]
 Description=grant the portal permission to capture without a consent dialog
@@ -2187,6 +2229,12 @@ KAUTH
 			"$ROOT/etc/systemd/user/default.target.wants/kde-mega-auth.service"
 	fi
 
+	# THE CAPTURE DAEMON'S UNIT, INSTALLED FOR THE DESKTOPS THAT ASK IT FOR A FRAME.
+	#
+	# SEE $NEEDS_EASYSTREAM ABOVE. Everything from here to the matching `fi` configures a
+	# service only useful to a walk that calls the est server, and 21 of the 24 desktops
+	# here read the scanout instead. The three plasma shells keep it.
+	if [ "$NEEDS_EASYSTREAM" = "1" ]; then
 	# EASYSTREAM IS ITS OWN UNIT, WITH ITS OWN RESTART POLICY. It is joined to the session by
 	# a DEPENDENCY (a socket that must exist), not by a lifecycle: a compositor restart must
 	# reconnect the capture daemon, not kill it.
@@ -2306,6 +2354,7 @@ DROPIN
 	mkdir -p "$ROOT/etc/systemd/user/default.target.wants"
 	ln -sf /usr/lib/systemd/user/easystream.service \
 		"$ROOT/etc/systemd/user/default.target.wants/easystream.service"
+	fi
 fi
 
 # --- 4. write the disk --------------------------------------------------------------------
