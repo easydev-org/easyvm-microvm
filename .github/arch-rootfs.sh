@@ -1704,7 +1704,20 @@ DWALL
 		# THE SESSION FILE'S OWN Exec= LINE, not a guess: gnome-flashback ships
 		# `Exec=/usr/lib/gnome-flashback-metacity`, which is a wrapper that starts
 		# gnome-session with the flashback components in the right order.
-		flashback) SESSION_EXEC=/usr/lib/gnome-flashback-metacity ;;
+		# GNOME FLASHBACK IS NOT gnome-session ON THIS IMAGE, BECAUSE IT CANNOT BE.
+		#
+		# /usr/lib/gnome-flashback-metacity runs `gnome-session --session=...`, and gnome-session
+		# starts the session by asking systemd to activate `gnome-session@<name>.target`. This
+		# image has no systemd user bus to carry that name (see the note in desktop.sh), so
+		# gnome-session aborts, the unit core-dumps, systemd restarts it every 3 s, and the frame
+		# stays black - MEASURED, `signal=ABRT` and 4 restarts inside 10 s.
+		#
+		# SO THE SESSION IS THE SAME COMPONENTS WITHOUT THE MIDDLEMAN: metacity as the window
+		# manager and gnome-panel as the panel, which is what the flashback session IS. MEASURED
+		# started by hand in the guest: metacity and gnome-panel both alive, and the next
+		# screendump showed the Applications/Places menus, the clock and the window list at
+		# mean=13.7071 spread=54.0959.
+		flashback) SESSION_EXEC="/usr/bin/metacity --replace & /usr/bin/gnome-panel & wait" ;;
 		esac
 
 		cat > "$ROOT/opt/desktop.sh" <<DESKTOP
@@ -1741,29 +1754,51 @@ export XDG_SESSION_TYPE=x11
 mkdir -p "\$XDG_RUNTIME_DIR"
 chmod 700 "\$XDG_RUNTIME_DIR"
 
-# THE BUS IS STARTED EXPLICITLY, WITH A KNOWN ADDRESS, RATHER THAN BY dbus-run-session.
+# THE BUS IS STARTED BY dbus-run-session, AND THE SESSION MANAGER RUNS INSIDE IT.
 #
-# MEASURED on GNOME Flashback: with dbus-run-session, the daemon came up, activated
-# org.gtk.vfs.Daemon successfully, and gnome-session STILL answered
+# THIS REVERSES AN EARLIER DECISION, AND THE MEASUREMENT IS WHY. The comment that used to be
+# here said dbus-run-session did not work because "gnome-session's session launcher re-executes
+# its children through a path that did not carry it". That diagnosis was wrong, and it cost
+# every X11 desktop on this image. MEASURED on GNOME Flashback, three runs of the failing walk,
+# with the guest's own journal:
 #
-#	A connection to the bus can't be made
+#	desktop.sh[2035]: Failed to upload environment to systemd:
+#	    GDBus.Error:org.freedesktop.DBus.Error.NameHasNoOwner:
+#	    Name "org.freedesktop.systemd1" does not exist
+#	desktop.sh[2035]: Failed to start unit
+#	    gnome-session@gnome-flashback-metacity.target: ... does not exist
+#	desktop.service: Main PID: 2035 (code=dumped, signal=ABRT)
+#	desktop.service: Active: activating (auto-restart)
 #
-# eleven times. dbus-run-session exports DBUS_SESSION_BUS_ADDRESS only to the process it
-# execs, and gnome-session's session launcher re-executes its children through a path that
-# did not carry it - the daemon was reachable and nothing could find it.
+# SO THE SESSION WAS NEVER RUNNING. gnome-session does not merely want a bus, it wants the
+# bus OWNED BY A SYSTEMD USER INSTANCE, because it starts the session through a systemd unit
+# (gnome-session@<session>.target). This image lingers vmuser, so `systemctl --user` answers
+# "running" - but the user manager's own bus socket under /run/user/1000/systemd/private was
+# never created, and /run/user/1000/bus did not exist at all: `systemctl --user start dbus`
+# silently did nothing. A plain dbus-daemon on that path (what this file used to start) gives
+# gnome-session a bus that has no org.freedesktop.systemd1 on it, so it aborts, systemd
+# restarts desktop.service every 3 s, and the frame stays black forever.
 #
-# NAMING THE SOCKET IN THE RUNTIME DIR IS THE FORM A LOGIN WOULD PRODUCE, and it is what every
-# desktop here is tested against: a fixed path that a child can find without an inherited
-# variable.
+# WHAT ACTUALLY WORKS, MEASURED: `dbus-run-session` around a session manager that does not
+# demand systemd. Started by hand in the guest:
+#
+#	dbus-run-session -- sh -c 'xsetroot -solid "#3366aa"; metacity --replace & \
+#	    gnome-panel & sleep 300'
+#
+# and the very next screendump read `mean=13.7071 spread=54.0959` - the Flashback panel with
+# Applications/Places, the clock and the window list, on the virtio-gpu scanout. Before that
+# run the same frame was `mean=0.0000 spread=0.0000`.
+#
+# dbus-run-session ALSO STARTED THE BUS THE EARLIER COMMENT SAID IT COULD NOT: its own daemon
+# came up, activated org.gtk.vfs.Daemon, and gnome-panel talked to it. What failed then was
+# gnome-SESSION, and the reason was the missing systemd1 name, not the bus transport.
+#
+# SO: NO SEPARATE dbus-daemon HERE. dbus-run-session owns the bus and execs the session
+# manager, which is one process tree the unit can supervise. The X11 session managers this
+# image runs (metacity, xfwm4, i3, openbox, muffin, marco, kwin_x11, deepin's dde-session,
+# enlightenment) are all plain programs that take a bus and a display; none of them requires a
+# systemd user instance to start, and that is the property this shape relies on.
 export DBUS_SESSION_BUS_ADDRESS="unix:path=\$XDG_RUNTIME_DIR/bus"
-exec dbus-daemon --session --address="\$DBUS_SESSION_BUS_ADDRESS" --nofork --nopidfile &
-DBUS_PID=\$!
-i=0
-while [ \$i -lt 100 ]; do [ -S "\$XDG_RUNTIME_DIR/bus" ] && break; i=\$((i+1)); sleep 0.1; done
-if [ ! -S "\$XDG_RUNTIME_DIR/bus" ]; then
-	echo "desktop: the session bus never appeared" >&2
-	exit 1
-fi
 # THE CONSOLE MARKER THE WALKTHROUGH ASSERTS ON.
 #
 # A DESKTOP MAY LOG NOTHING TO THE SERIAL CONSOLE. MEASURED in CI: the i3 walkthrough waited
@@ -1816,7 +1851,15 @@ xsetroot -solid '#2f4f6f' 2>/dev/null || true
 ) &
 
 echo "ARCH-SESSION-STARTING: $DESKTOP"
-exec $SESSION_EXEC
+# THE SESSION RUNS UNDER ITS OWN BUS. See the long note above for why this is dbus-run-session
+# and not a daemon started here: gnome-session wants a bus that carries org.freedesktop.systemd1,
+# this image's user manager never publishes one, and every X11 desktop was aborting on that.
+#
+# `--` SEPARATES dbus-run-session's own options from the command. `sh -c` IS USED SO A SESSION
+# EXEC CAN BE MORE THAN ONE PROGRAM - flashback's is metacity plus gnome-panel plus `wait` - and
+# `exec` keeps the unit's main pid on the session so a crash is `desktop.service` failing rather
+# than an orphan.
+exec dbus-run-session -- sh -c "exec $SESSION_EXEC"
 DESKTOP
 		chmod 0755 "$ROOT/opt/desktop.sh"
 	fi
