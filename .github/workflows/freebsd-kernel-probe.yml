@@ -39,8 +39,41 @@ name: freebsd-kernel-probe
 #	firecracker   KERNCONF=FIRECRACKER, stock       - does the published config even compile here?
 #	qemumicrovm   KERNCONF=QEMUMICROVM, derived     - the same config with ACPI left ON
 #
-# The second is generated from the first by a patch below rather than kept as a second file, so the
-# difference between them is one hunk a reader can see instead of two 200-line files to diff.
+# The second is generated from the first by a script rather than kept as a second file, so the
+# difference between them is three hunks a reader can see instead of two 200-line files to diff.
+#
+# ---------------------------------------------------------------------------------------------------
+# WHAT WAS MEASURED, AND WHERE IT STOPS
+#
+# RUN 45636229092, both rows, boot_probe=1, under TCG (a hosted runner has no /dev/kvm):
+#
+#	IT CROSS-COMPILES, AND THAT PART WORKS. FreeBSD 14.3's kernel builds from source on
+#	ubuntu-24.04 in about nine minutes with no FreeBSD machine involved: 15.9 MB, ELF64 EM_X86_64,
+#	carrying XEN_ELFNOTE_PHYS32_ENTRY (note type 18) so qemu's loader enters it. Both configs.
+#
+#	STOCK FIRECRACKER PANICS AT `TSC not initialized` in lapic_init. Its own config says why:
+#	`envvar machdep.disable_tsc_calibration="1"` is a Firecracker workaround, and the derived
+#	config drops it - that kernel reaches start_TSC() and gets further.
+#
+#	AND THE DERIVED ONE PANICS NEXT, IN A PLACE THAT NAMES THE REAL OBSTACLE:
+#
+#		pvclock_get_timecount() ...
+#		xen_delay() ...
+#		start_TSC()
+#		panic: page fault, fault virtual address = 0x20
+#
+#	`xen_delay` and `pvclock_get_timecount` are registered by `sys/x86/xen/pv.c`
+#	(`.early_delay = xen_delay`). FREEBRD'S PVH ENTRY POINT IS XEN'S ENTRY POINT, and PVH is Xen's
+#	ABI: the kernel comes up believing a Xen host filled in a `pvclock_vcpu_time_info` shared page
+#	and dereferences a pointer qemu never set. Firecracker avoids this by building without
+#	xenpci/xentimer - Colin Percival's write-up says the code is "still mixed up with Xen support"
+#	and that separating it "will simplify things significantly". qemu's microvm does not have
+#	that separation.
+#
+# SO THE ANSWER TO "CAN FREEBRD RUN AS A MICROVM GUEST" IS: THE KERNEL BUILDS HERE AND IS LOADED,
+# and the boot then needs a configuration that does NOT take the Xen PV path - which is more than a
+# flag. THIS JOB DOES NOT CLAIM THE GUEST WORKS. The gates below report which of those three
+# things happened instead of passing or failing on a hunch.
 #
 # ---------------------------------------------------------------------------------------------------
 # WHAT THIS JOB PROVES AND WHAT IT DOES NOT
@@ -227,6 +260,11 @@ jobs:
       # is diagnosable from the log alone.
       - name: try to boot it under qemu's software emulation
         if: inputs.boot_probe == '1'
+        # NOT `continue-on-error: false`: the panic in the Xen PV path is the FINDING, not a
+        # regression, and a red workflow would say "this broke" about something that has never
+        # worked. The step still fails so the verdict is visible in the checks; the summary above
+        # carries the explanation.
+        continue-on-error: false
         run: |
           set -eux
           sudo apt-get -yq --no-install-suggests --no-install-recommends install qemu-system-x86
@@ -248,20 +286,30 @@ jobs:
           set -e
           echo "--- last 30 lines ---"
           tail -30 /tmp/boot.log || true
-          # THE THREE OUTCOMES, NAMED, BECAUSE "IT FAILED" IS NOT A FINDING:
+          # THE FOUR OUTCOMES, NAMED, BECAUSE "IT FAILED" IS NOT A FINDING. MEASURED, the control
+          # kernels this was validated against:
           #
-          #	reached userspace/root   a login prompt, a mount, or a shell - it boots
-          #	probed and could not      it looked for devices and found none - the netbsd-GENERIC
-          #	                          shape, which is exactly what a PCI-only kernel does here
-          #	silent                    nothing came back - it did not get entered at all
-          if grep -qE 'login:|FreeBSD/amd64|mountroot>' /tmp/boot.log; then
+          #	netbsd-MICROVM   banner, mounts its root, reaches a prompt      boots
+          #	netbsd-GENERIC   banner, `unknown device major 0xffff...`       cannot find its disk
+          #	freebsd stock    banner, `panic: TSC not initialized`          panics in the timecounter
+          #	freebsd derived  banner, `panic: page fault` in start_TSC()    panics in the Xen PV path
+          #
+          # A BANNER IS NOT A PASS, which the first control proves: netbsd-GENERIC prints one too.
+          # The gate asks whether userspace was reached, and when it was not it says WHICH way it
+          # stopped, because the three failures have three different causes.
+          if grep -qE 'login:|mountroot>|FreeBSD/amd64' /tmp/boot.log; then
             echo "VERDICT: reached userspace"
+          elif grep -q 'panic:' /tmp/boot.log; then
+            reason=$(grep -m1 'panic:' /tmp/boot.log | sed 's/^.*panic:/panic:/')
+            echo "::error::VERDICT: the kernel panicked - $reason"
+            echo "::error::it was entered and then died; see the backtrace above"
+            exit 1
           elif grep -qE 'unknown device major|no disks|Can.t find|Mounting from' /tmp/boot.log; then
             echo "::error::VERDICT: the kernel ran but could not find its virtio-MMIO devices"
             echo "::error::that is the netbsd-GENERIC shape: built for a PCI machine, not this one"
             exit 1
           elif [ -s /tmp/boot.log ]; then
-            echo "VERDICT: output but no device probe - read the dump above"
+            echo "VERDICT: output but no verdict matched - read the dump above"
           else
             echo "::error::VERDICT: no output at all, so qemu never entered the kernel"
             exit 1
@@ -281,4 +329,14 @@ jobs:
             echo "### ${{ matrix.row }} (\`${{ matrix.kernconf }}\`, \`${{ inputs.fbsd_ref || 'releng/14.3' }}\`)"
             echo ""
             ls -l out/ 2>/dev/null || echo "no artifact"
+            echo ""
+            # THE BOOT RESULT BELONGS IN THE SUMMARY AND NOT ONLY IN THE LOG, because it is the
+            # answer this workflow exists to produce and it is one line.
+            if [ -s /tmp/boot.log ]; then
+              echo '```'
+              echo "startup verdict:"
+              grep -m1 -E 'panic:|login:|unknown device major|mountroot>' /tmp/boot.log \
+                || echo "no verdict line: see the boot step"
+              echo '```'
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
