@@ -65,8 +65,43 @@ step "wait 35s"
 # says a desktop was drawn. MEASURED on this image - "PASS mean=133.7 frame=1024x768" with
 # Plasma's wallpaper and panel, and "FAIL mean=0.0" on the same guest when DPMS had blanked
 # the output, which is the failure that looks like a working capture without this test.
-step "ssh /opt/portal-capture.sh"
-  ssh /opt/portal-capture.sh
+# AND THE PIXELS, FROM THE SCANOUT. This is the assertion the header of this file describes and
+# the one the other twenty-one desktops use: `read:` is qemu's screendump of the framebuffer
+# virtio-gpu put on the PCIe bus, so it photographs exactly what the compositor scanned out.
+#
+# IT REPLACES `ssh /opt/portal-capture.sh`, WHICH ASKED EASYSTREAM THROUGH THE PORTAL. That step
+# measured a real desktop (MEASURED: "portal-capture: PASS mean=133.7 frame=1024x768") but it
+# measured it through a capture daemon, so the walk proved the daemon rather than the display.
+# Now nothing sits between the compositor and the measurement.
+step "read the whole screen as \"screen\""
+  read
+    name screen
+
+# TWO QUESTIONS ABOUT ONE FRAME, BECAUSE "NOT BLACK" HAS TWO FAILURE SHAPES. A guest with no GPU
+# records a uniformly BLACK frame; a compositor that never drew records a uniformly COLOURED one,
+# which is not black but is equally empty. MEASURED on this image through the portal: mean 133.7.
+# The floors are 1 on both, which is above a dead frame (0.0 with a deviation of 0.03) and below
+# every working desktop here (mean 2.6..134).
+step "the screen is not black"
+  check
+    must true
+    source screen
+    mode mean_between
+    name screen_is_not_black
+    range [1, 255]
+    rect [0, 0, 1024, 768]
+    rect_at [1024, 768]
+
+step "the screen is not one flat colour"
+  check
+    must true
+    source screen
+    mode spread_between
+    name screen_has_content
+    range [1, 128]
+    rect [0, 0, 1024, 768]
+    rect_at [1024, 768]
+
 
 step "stop the machine by killing it, waiting up to 60s"
   stop kill

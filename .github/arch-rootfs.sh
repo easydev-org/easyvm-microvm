@@ -177,10 +177,19 @@ esac
 # SO THE INSTALL IS CONDITIONAL ON THE DESKTOP INSTEAD OF UNCONDITIONAL. That is the whole
 # change: the same image on the other 21 desktops no longer downloads, unpacks, links and starts
 # a capture daemon nobody reads, and the plasma three are untouched.
+# NO DESKTOP INSTALLS easystream ANY MORE, AND THIS IS NOW TRUE OF ALL TWENTY-FOUR.
+#
+# The variable is kept rather than deleted because deleting it would mean deleting five separate
+# `if` blocks and the comments that explain them, and a reader arriving at `easystream` in this
+# file deserves the reason it is not installed. What changed is the value: it was 1 for plasma,
+# plasma-mobile and plasma-bigscreen because those three used to assert through
+# `ssh /opt/portal-capture.sh`; their walks now `read:` the virtio-gpu scanout like the other
+# twenty-one, so nothing calls the est server.
+#
+# MEASURED on the published plasma rootfs before this was set to 0: kwin_wayland and plasmashell
+# running, and qemu's screendump of the scanout read mean=121.1795 spread=52.8418 - the Plasma
+# wallpaper, the panel, the clock and the tray, with no capture daemon involved.
 NEEDS_EASYSTREAM=0
-case "$DESKTOP" in
-plasma|plasma-mobile|plasma-bigscreen) NEEDS_EASYSTREAM=1 ;;
-esac
 
 OUT="${1:-.}"
 WORK="${OUT}/arch-build"
