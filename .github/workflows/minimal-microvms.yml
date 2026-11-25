@@ -101,6 +101,18 @@ jobs:
           - distro: netbsd
             timeout: 40
             asset: rootfs-netbsd-minimal:netbsd-rootfs.tar
+          # DEBIAN HAS A SECOND ROOTFS - `rootfs-debian-xfce`, still built by `microvm-rootfs.yml`
+          # - and until now the only thing that ever booted it was `microvm-boot.yml`, the dead
+          # workflow. Its walk is NOT named after the pattern this matrix derives, so it carries
+          # an explicit `walk` and the job below prefers that field when it is set.
+          #
+          # IT IS A DESKTOP WITHOUT A GPU, which is why it belongs here rather than in
+          # `arch-desktops.yml`: Xvfb renders into the process's own memory and easystream reads it
+          # through the X protocol, so no DRM node is needed. See the walk's own header.
+          - distro: debian-xfce
+            timeout: 40
+            asset: rootfs-debian-xfce:debian-rootfs.tar
+            walk: debian-microvm/steps/xfce.walk
     uses: easydev-org/easyvm/.github/workflows/stage.yml@v0.0.4
     secrets: inherit
     with:
@@ -113,7 +125,7 @@ jobs:
         [
           {
             "name": "microvm-${{ matrix.distro }}-console",
-            "file": "${{ matrix.distro }}-microvm/steps/console.walk",
+            "file": "${{ matrix.walk || format('{0}-microvm/steps/console.walk', matrix.distro) }}",
             "pull": "",
             "assets": ["${{ matrix.asset }}"],
             "out": "",
