@@ -106,15 +106,25 @@ jobs:
           # that, but the tag is recorded here so the log says which tree was built.
           echo "FREEBSD_REF=$ref" >> "$GITHUB_ENV"
 
-      # THE PACKAGES ARE THE ONES FREEBSD'S OWN CROSS JOB INSTALLS, minus the compiler: `make.py`
-      # bootstraps clang from the source tree, which is the point - the host compiler is not the
-      # guest's compiler and mixing them is how a kernel ends up with host-specific code paths.
+      # THE PACKAGES ARE THE ONES FREEBSD'S OWN CROSS JOB INSTALLS - INCLUDING THE COMPILER, AND THAT
+      # IS THE OPPOSITE OF WHAT I FIRST WROTE HERE. MEASURED on run 45627903049, both rows:
+      #
+      #	Could not infer value for $XCC. Either set $XCC or pass --cross-bindir=/cross/compiler/dir/bin
+      #
+      # so `make.py` does NOT start from nothing: it wants a host LLVM to bootstrap FROM, and only
+      # then uses the tree's own compiler for the kernel. `freebsd-src`'s own
+      # `cross-bootstrap-tools.yml` passes `--cross-bindir=/usr/lib/llvm-18/bin` on ubuntu-24.04,
+      # which is exactly the combination this runner is.
       - name: install the host build dependencies
         run: |
           set -eux
           sudo apt-get update --quiet
           sudo apt-get -yq --no-install-suggests --no-install-recommends install \
-            bmake libarchive-dev libbz2-dev libssl-dev flex
+            bmake libarchive-dev libbz2-dev libssl-dev flex clang-18 lld-18
+          # THE VERSION IS PINNED TO WHAT THE RUNNER IMAGE CARRIES; ubuntu-24.04 has llvm-18, and a
+          # missing directory is a clear failure here rather than a confusing one an hour into make.
+          test -x /usr/lib/llvm-18/bin/clang
+          echo "CROSS_BINDIR=/usr/lib/llvm-18/bin" >> "$GITHUB_ENV"
 
       - name: write the kernel configuration
         if: matrix.row == 'qemumicrovm'
@@ -141,20 +151,22 @@ jobs:
           mkdir -p "$MAKEOBJDIRPREFIX"
           NPROC=$(getconf _NPROCESSORS_ONLN)
           echo "building with -j$NPROC on $(nproc) cpus"
-          # `--cross-bindir` IS NOT PASSED, DELIBERATELY. It exists to make make.py use a host llvm
-          # instead of the bootstrapped one; a bootstrap is what makes this independent of whatever
-          # clang the runner image happens to carry.
+          # `--cross-bindir` IS PASSED, AND THE COMMENT ABOVE THE PACKAGES SAYS WHY: without it
+          # `make.py` stops at "Could not infer value for $XCC" before compiling anything.
           #
           # A DRY RUN FIRST, because it is the step that catches a broken tree or a missing host
           # dependency before an hour of compiling. It prints the commands instead of running them.
-          ./tools/build/make.py TARGET=amd64 TARGET_ARCH=amd64 -n > /tmp/dryrun.txt 2>&1 || {
+          ./tools/build/make.py --cross-bindir="$CROSS_BINDIR" \
+            TARGET=amd64 TARGET_ARCH=amd64 -n > /tmp/dryrun.txt 2>&1 || {
             echo "::error::make.py could not even plan the build"; tail -40 /tmp/dryrun.txt; exit 1; }
           echo "dry run ok: $(wc -l < /tmp/dryrun.txt) lines"
 
-          time ./tools/build/make.py TARGET=amd64 TARGET_ARCH=amd64 \
+          time ./tools/build/make.py --cross-bindir="$CROSS_BINDIR" \
+            TARGET=amd64 TARGET_ARCH=amd64 \
             kernel-toolchain -s -j"$NPROC" -DWITH_DISK_IMAGE_TOOLS_BOOTSTRAP
 
-          time ./tools/build/make.py TARGET=amd64 TARGET_ARCH=amd64 \
+          time ./tools/build/make.py --cross-bindir="$CROSS_BINDIR" \
+            TARGET=amd64 TARGET_ARCH=amd64 \
             KERNCONF=${{ matrix.kernconf }} buildkernel -s -j"$NPROC"
 
       - name: put the kernel where the checks can find it
