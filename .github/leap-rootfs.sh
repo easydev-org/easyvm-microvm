@@ -133,10 +133,10 @@ KERNEL="$ROOT/usr/lib/modules/$KVER/vmlinuz"
 # exactly this sequence.
 log "building the initramfs"
 if [ ! -f "$WORK/busybox" ]; then
-	curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors --max-time 300 \
-		-o "$WORK/busybox" \
-		"https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox"
-	chmod +x "$WORK/busybox"
+	# PUBLISHED, NOT DOWNLOADED PER BUILD. busybox.net lost two builds in one day; the bytes
+	# never change, so a build pulls `busybox-static` from this repository's own package and
+	# only a cold registry fetches it. See the header of get-busybox.sh.
+	sh "$HERE/get-busybox.sh" "$WORK/busybox"
 fi
 
 python3 "$HERE/make-initramfs.py" \

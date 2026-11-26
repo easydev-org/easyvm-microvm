@@ -55,6 +55,8 @@ on:
       - ".github/leap-rootfs.sh"
       - ".github/netbsd-rootfs.sh"
       - ".github/fetch-image.py"
+      - ".github/get-busybox.sh"
+      - ".github/fetch-busybox-for-publish.sh"
       - ".github/make-initramfs.py"
       - ".github/workflows/microvm-rootfs.yml"
   pull_request:
@@ -67,6 +69,8 @@ on:
       - ".github/leap-rootfs.sh"
       - ".github/netbsd-rootfs.sh"
       - ".github/fetch-image.py"
+      - ".github/get-busybox.sh"
+      - ".github/fetch-busybox-for-publish.sh"
       - ".github/make-initramfs.py"
       - ".github/workflows/microvm-rootfs.yml"
   workflow_dispatch:
@@ -79,7 +83,62 @@ env:
   ALPINE_VERSION: "3.21"
 
 jobs:
+  # PUBLISH THE STATIC BUSYBOX ONCE, BEFORE ANY ROOTFS IS BUILT.
+  #
+  # Four rows below need it as their initramfs's first process - see the header of
+  # make-initramfs.py for why that must be a static busybox and not systemd. It used to be fetched
+  # from busybox.net by each of them, and on 2026-11-26 that host cost two rootfs jobs:
+  #
+  #	curl: (28) Failed to connect to busybox.net port 443 after 133013 ms
+  #
+  # The bytes are a released static binary and never change, so they are published here and pulled
+  # by the builds. `get-busybox.sh` verifies the sha256 either way, so a bad pull is not silently
+  # used - it falls back to the direct fetch.
+  busybox:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: fetch and verify the static busybox
+        run: |
+          set -eux
+          out=/tmp/busybox-out
+          mkdir -p "$out"
+          sh .github/fetch-busybox-for-publish.sh "$out/busybox"
+          ls -l "$out/busybox"
+
+      # ONE MEMBER, NAMED AFTER THE TAG, because `oci-push` mirrors one file and `pull-artifact.sh`
+      # unpacks a tar. get-busybox.sh expects exactly this name inside.
+      - name: tar it as busybox-static
+        run: |
+          set -eux
+          cd /tmp/busybox-out
+          cp busybox busybox-static
+          tar -cf /tmp/busybox-static.tar busybox-static
+          tar -tf /tmp/busybox-static.tar
+          ls -l /tmp/busybox-static.tar
+
+      - name: push to the registry
+        if: github.event_name != 'pull_request'
+        uses: easydev-org/easyactions/oci-push@main
+        with:
+          path: /tmp/busybox-static.tar
+          tag: busybox-static
+          repository: ${{ github.repository }}
+          media-type: application/vnd.easydev.rootfs
+          token: ${{ github.token }}
+          check-name: busybox-static
+
   build:
+    # THE BUSYBOX JOB IS A DEPENDENCY AND NOT A HARD GATE. A pull request cannot push to the
+    # package, so `busybox` publishes nothing there - but the rows still build, because
+    # get-busybox.sh falls back to the direct fetch. `always()` would defeat the point of the
+    # dependency, so it is a plain `needs`, and the fallback covers the one case where it matters.
+    needs: busybox
     runs-on: ubuntu-latest
     timeout-minutes: 40
     permissions:
@@ -317,7 +376,17 @@ jobs:
           # `DESKTOP` GOES THROUGH `env` RATHER THAN `sudo -E`, because `-E` only passes what
           # sudoers allows and the runner's file is not ours to rely on. An unset value (alpine's
           # row) reaches the script as the empty string, which alpine's script does not read.
-          sudo env DESKTOP="${{ matrix.desktop }}" sh ${{ matrix.script }} "$out"
+          #
+          # THE TOKEN AND THE REPOSITORY GO THE SAME WAY, because `sudo` drops the environment:
+          # get-busybox.sh pulls `busybox-static` from this repository's package with them, and
+          # without them it would fall back to busybox.net on every build - which is the thing the
+          # published asset exists to avoid. They are not secrets beyond this job; the token is
+          # `github.token`, already scoped to this repository.
+          sudo env \
+            DESKTOP="${{ matrix.desktop }}" \
+            GITHUB_TOKEN="${{ github.token }}" \
+            GITHUB_REPOSITORY="${{ github.repository }}" \
+            sh ${{ matrix.script }} "$out"
           sudo chown -R "$(id -u):$(id -g)" "$out"
 
           # EVERY FILE IS ASSERTED NON-EMPTY BEFORE IT IS PUBLISHED. A build that "succeeded" with an

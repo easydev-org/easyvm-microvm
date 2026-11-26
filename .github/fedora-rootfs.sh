@@ -108,11 +108,10 @@ KERNEL="$ROOT/usr/lib/modules/$KVER/vmlinuz"
 [ -f "$KERNEL" ] || { log "no vmlinuz under $ROOT/usr/lib/modules/$KVER"; exit 1; }
 
 if [ ! -f "$WORK/busybox" ]; then
-	log "fetching a static busybox"
-	curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors --max-time 300 \
-		-o "$WORK/busybox" \
-		"https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox"
-	chmod +x "$WORK/busybox"
+	# PUBLISHED, NOT DOWNLOADED PER BUILD. busybox.net lost two builds in one day; the bytes
+	# never change, so a build pulls `busybox-static` from this repository's own package and
+	# only a cold registry fetches it. See the header of get-busybox.sh.
+	sh "$HERE/get-busybox.sh" "$WORK/busybox"
 fi
 
 log "building the initramfs"
