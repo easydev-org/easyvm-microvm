@@ -66,10 +66,25 @@ else
 fi
 OUT="${1:-.}"
 WORK="${OUT}/debian-build"
-# SEE THE `DEBIAN_MIRROR` BLOCK BELOW THE SOURCES FOR THE MEASUREMENT. `DEBIAN_MIRROR=` (empty)
-# keeps the image's own `deb.debian.org`, which is the right default for anyone not behind this
-# lab's proxy; the default here is the mirror that measured 26 MB/s from it.
-MIRROR="${DEBIAN_MIRROR-http://mirrors.ustc.edu.cn}"
+# NO MIRROR IS CONFIGURED, AND THE IMAGE'S OWN `deb.debian.org` IS WHAT IS USED.
+#
+# This file used to default to a Chinese university mirror because the official one measured
+# 34 kB/s from one particular lab host. That is a property of one network, not of this build, and
+# hard-coding it made the build depend on a third party that does not owe this project anything:
+# MEASURED on 2026-11-25, `rootfs-debian-minimal` failed with
+#
+#	apt mirror: http://mirrors.ustc.edu.cn
+#	E: The repository 'http://mirrors.ustc.edu.cn/debian trixie InRelease' is not signed.
+#	E: Failed to fetch ... 403  Forbidden [IP: 202.38.95.110 80]
+#
+# - the mirror answered 403 and the whole rootfs was lost. `deb.debian.org` is the name Debian
+# publishes for exactly this purpose; it is a CDN with points of presence everywhere, and a runner
+# is not behind the lab's proxy. If a future build really is slow, that is a runner problem to
+# report rather than a mirror to bake in.
+#
+# `DEBIAN_MIRROR` is still honoured if it is SET, because a developer debugging a slow link may
+# want it - but the default is now empty, which means "leave the image's sources alone".
+MIRROR="${DEBIAN_MIRROR-}"
 
 log() { printf '  %s\n' "$*"; }
 mkdir -p "$WORK" "$OUT"
@@ -177,12 +192,13 @@ log "installing the kernel and initramfs-tools (about 90 MiB)"
 # `sources.list` is left empty.
 : > "$ROOT/etc/apt/sources.list"
 
-# THE ORIGINAL SOURCES ARE KEPT, BECAUSE THE MIRROR IS FOR THIS BUILD AND NOT FOR THE IMAGE.
+# THE ORIGINAL SOURCES ARE KEPT ASIDE, FOR THE CASE WHERE A MIRROR WAS ASKED FOR.
 #
-# A guest is a system that upgrades itself. `mirrors.ustc.edu.cn` is fast FROM THIS BUILD HOST - it
-# says nothing about the network the guest will run on, and baking it in would leave a machine whose
-# `apt-get upgrade` is pointed at a mirror chosen for somebody else's route. So the file is copied
-# aside here and put back after the install, below.
+# With no `DEBIAN_MIRROR` set - which is every CI run - nothing below rewrites the sources, so this
+# copy is inert and the restore at the end of the install is skipped. It stays because a developer
+# who sets the variable still gets the original file put back: a guest is a system that upgrades
+# itself, and baking in a mirror chosen for one build host would point every future `apt-get
+# upgrade` in that guest at somebody else's route.
 ORIG_SOURCES="$WORK/orig-debian.sources"
 if [ -f "$ROOT/etc/apt/sources.list.d/debian.sources" ]; then
 	cp "$ROOT/etc/apt/sources.list.d/debian.sources" "$ORIG_SOURCES"
@@ -191,25 +207,34 @@ else
 	rm -f "$WORK/orig-had-sources"
 fi
 if [ ! -f "$ROOT/etc/apt/sources.list.d/debian.sources" ]; then
-	printf 'deb %s/debian %s main\n' "$MIRROR" "$V" > "$ROOT/etc/apt/sources.list"
-	printf 'deb %s/debian %s-updates main\n' "$MIRROR" "$V" >> "$ROOT/etc/apt/sources.list"
-	printf 'deb %s/debian-security %s-security main\n' "$MIRROR" "$V" >> "$ROOT/etc/apt/sources.list"
+	# THE IMAGE HAD NO SOURCES FILE AT ALL. Name the OFFICIAL suite, never a mirror, unless one
+	# was asked for explicitly - `$MIRROR` defaults to empty and `//debian` would be a relative
+	# URL that apt rejects.
+	base="${MIRROR:-http://deb.debian.org}"
+	printf 'deb %s/debian %s main\n' "$base" "$V" > "$ROOT/etc/apt/sources.list"
+	printf 'deb %s/debian %s-updates main\n' "$base" "$V" >> "$ROOT/etc/apt/sources.list"
+	printf 'deb %s/debian-security %s-security main\n' "$base" "$V" >> "$ROOT/etc/apt/sources.list"
 fi
 
-# THE MIRROR IS AN OPTION BECAUSE THE IMAGE'S DEFAULT IS 200x SLOWER FROM HERE THAN THE ALTERNATIVE.
+# THE MIRROR IS AN OPTION AND IT IS OFF BY DEFAULT. It exists only for a developer whose own link
+# to deb.debian.org is slow; nothing in this repository sets it, and the workflow sets no
+# `DEBIAN_MIRROR`, so a CI build fetches from the distribution's own name.
 #
-# MEASURED, 10 s each through the lab's proxy, same file (`dists/trixie/main/binary-amd64/Packages.xz`):
+# THE MEASUREMENT THAT ONCE JUSTIFIED A DEFAULT IS KEPT BECAUSE IT IS WHY THIS BLOCK EXISTS AT ALL,
+# measured on one lab host, 10 s each, same file (`dists/trixie/main/binary-amd64/Packages.xz`):
 #
 #	deb.debian.org (HTTP)                34 kB/s   <- what the image's debian.sources names
 #	mirrors.tuna.tsinghua.edu.cn        3.1 MB/s
 #	mirrors.aliyun.com                  415 kB/s
 #	mirrors.ustc.edu.cn                  26 MB/s
 #
-# The install is ~90 MiB of index plus ~400 MiB of packages, so at 34 kB/s it is HOURS - and the
-# first run of this file sat in `apt-get update` with 4.4 MB of `Packages.xz` on disk after five
-# minutes, which reads exactly like a hang. The sources are rewritable, so they are rewritten.
+# AND THAT DEFAULT COST A BUILD. `mirrors.ustc.edu.cn` answered 403 on 2026-11-25 and the whole
+# `rootfs-debian-minimal` job failed with "the repository is not signed" - a third-party mirror had
+# become a single point of failure for a rootfs this repository publishes. A build that depends on
+# somebody else's mirror is a build that breaks on somebody else's schedule.
 #
-# IT STAYS `http://`, AND THAT IS THE OFFICIAL ARRANGEMENT RATHER THAN A COMPROMISE.
+# IT STAYS `http://` WHEN A MIRROR IS USED, AND THAT IS THE OFFICIAL ARRANGEMENT RATHER THAN A
+# COMPROMISE.
 #
 # `debian:trixie` SHIPS NO `ca-certificates`: MEASURED, `/etc/ssl` does not exist in the layer and
 # `ca-certificates` is absent from its dpkg database. That is why the image's own
@@ -241,7 +266,9 @@ Suites: ${V}-security
 Components: main
 Signed-By: /usr/share/keyrings/debian-archive-keyring.pgp
 SOURCES
-	log "apt mirror: ${MIRROR}"
+	log "apt mirror: ${MIRROR} (explicitly requested, not a default)"
+else
+	log "apt sources: the image's own deb.debian.org (no mirror configured)"
 fi
 cp /etc/resolv.conf "$ROOT/etc/resolv.conf" 2>/dev/null || true
 
@@ -323,18 +350,25 @@ env ${https_proxy:+https_proxy="$https_proxy"} ${http_proxy:+http_proxy="$http_p
 			|| echo "WARNING: virtio_blk is not in the generated initramfs"
 	'
 
-# AND THE MIRROR GOES BACK TO WHAT THE IMAGE SHIPPED, because it was for this build only.
+# AND THE SOURCES ARE LEFT AS THE IMAGE SHIPPED THEM, WHICH IS NOW ALWAYS THE CASE.
 #
-# MEASURED: the difference is 26 MB/s against 34 kB/s HERE, which is the difference between minutes
-# and hours for 500 MB of packages - and zero difference to a guest on another network. Leaving
-# `mirrors.ustc.edu.cn` in the tree would make every future `apt` the guest runs depend on a host
-# chosen for this build machine's route.
-if [ -f "$WORK/orig-had-sources" ]; then
+# Nothing rewrites them any more (see the note at `MIRROR=`), so the copy taken at 195 and this
+# restore are only meaningful when a developer set `DEBIAN_MIRROR` on purpose. In that one case the
+# image's own file goes back, because a mirror chosen for THIS build host says nothing about the
+# network the guest will run on - leaving it in the tree would make every future `apt` in the guest
+# depend on a host picked for somebody else's route.
+#
+# AND WHEN THERE WAS NO FILE TO RESTORE, NOTHING IS DELETED. The old branch removed
+# `debian.sources` outright, which strips a guest of its package sources entirely - and with no
+# mirror configured that branch is the one a CI build takes.
+if [ -n "$MIRROR" ] && [ -f "$WORK/orig-had-sources" ]; then
 	cp "$ORIG_SOURCES" "$ROOT/etc/apt/sources.list.d/debian.sources"
 	log "apt sources restored to the image's own"
-else
+elif [ -n "$MIRROR" ]; then
 	rm -f "$ROOT/etc/apt/sources.list.d/debian.sources" "$ROOT/etc/apt/sources.list"
 	log "apt sources removed, because the image shipped none"
+else
+	log "apt sources left as the image shipped them"
 fi
 
 # --- 2b. THE ACCOUNT THE DRIVER LOGS IN AS ---------------------------------------------
