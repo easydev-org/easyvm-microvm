@@ -201,8 +201,10 @@ qemu-img convert -f raw -O qcow2 -c "$WORK/rootfs.raw" "$OUT/ubuntu.qcow2"
 # `=y`, so the archive carries NO modules and is only a shell plus switch_root.
 log "kernel $KVER"
 if [ ! -f "$WORK/busybox" ]; then
-	# ONE HOST FOR THIS WAS A SINGLE POINT OF FAILURE. See the header of get-busybox.sh.
-	sh "$HERE/get-busybox.sh" "$WORK/busybox"
+	curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors --max-time 300 \
+		-o "$WORK/busybox" \
+		"https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox"
+	chmod +x "$WORK/busybox"
 fi
 
 python3 "$HERE/make-initramfs.py" \
