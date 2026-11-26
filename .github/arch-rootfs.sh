@@ -166,29 +166,22 @@ esac
 # THAT WAS NOT ALWAYS TRUE. Before the GPU was attached a microvm had no framebuffer to dump, so
 # easystream was added to read pixels out of the compositor through its own protocol and serve
 # them as `est://`. The walks still carry long comments about easystream because that is the
-# history - but for 21 of these 24 desktops nothing calls it any more.
+# history.
 #
-# THE THREE THAT DO CALL IT ARE THE PLASMA SHELLS, and they call it from outside: their walk's
-# last assertion is `ssh /opt/portal-capture.sh`, a script INSIDE the image that asks the
-# easystream est server for one frame over xdg-desktop-portal and checks the mean brightness.
-# MEASURED on Plasma over virtio-gpu: "portal-capture: PASS mean=133.7 frame=1024x768". Drop
-# easystream from those and the walk has nothing to ask.
+# THE THREE PLASMA SHELLS WERE THE LAST HOLD-OUTS, and they held out from outside the walk: their
+# last step was `ssh /opt/portal-capture.sh`, a script inside the image that asked the est server
+# for one frame over xdg-desktop-portal (MEASURED then: "portal-capture: PASS mean=133.7"). Those
+# walks now `read:` the virtio-gpu scanout like the other twenty-one, and the script is gone.
 #
-# SO THE INSTALL IS CONDITIONAL ON THE DESKTOP INSTEAD OF UNCONDITIONAL. That is the whole
-# change: the same image on the other 21 desktops no longer downloads, unpacks, links and starts
-# a capture daemon nobody reads, and the plasma three are untouched.
-# NO DESKTOP INSTALLS easystream ANY MORE, AND THIS IS NOW TRUE OF ALL TWENTY-FOUR.
-#
-# The variable is kept rather than deleted because deleting it would mean deleting five separate
-# `if` blocks and the comments that explain them, and a reader arriving at `easystream` in this
-# file deserves the reason it is not installed. What changed is the value: it was 1 for plasma,
-# plasma-mobile and plasma-bigscreen because those three used to assert through
-# `ssh /opt/portal-capture.sh`; their walks now `read:` the virtio-gpu scanout like the other
-# twenty-one, so nothing calls the est server.
-#
-# MEASURED on the published plasma rootfs before this was set to 0: kwin_wayland and plasmashell
+# MEASURED on the published plasma rootfs before its walk was changed: kwin_wayland and plasmashell
 # running, and qemu's screendump of the scanout read mean=121.1795 spread=52.8418 - the Plasma
 # wallpaper, the panel, the clock and the tray, with no capture daemon involved.
+#
+# SO NO DESKTOP INSTALLS easystream, AND THE VARIABLE IS KEPT RATHER THAN DELETED. Deleting it would
+# mean deleting five `if` blocks and the comments that explain them, and a reader arriving at
+# `easystream` in this file deserves the reason it is not installed - which is the same reason the
+# blocks are still here: they are what a desktop that genuinely needs a capture protocol would
+# start from.
 NEEDS_EASYSTREAM=0
 
 OUT="${1:-.}"
@@ -614,9 +607,10 @@ rm -rf "$ROOT/var/cache/pacman/pkg"/* "$ROOT/var/log"/* 2>/dev/null || true
 if [ "$DESKTOP_FAMILY" != "none" ]; then
 	# --- 3b. EASYSTREAM, FOR THE DESKTOPS THAT ASK IT FOR A FRAME -------------------------
 	#
-	# SEE $NEEDS_EASYSTREAM ABOVE FOR WHY THIS IS CONDITIONAL. On the 21 desktops whose walk
-	# reads the scanout, nothing runs easystream and nothing asks it for pixels, so it is not
-	# installed; on the plasma shells `/opt/portal-capture.sh` does exactly that.
+	# SEE $NEEDS_EASYSTREAM ABOVE. It is 0 for every desktop, so this block does not run: the
+	# walks all read the virtio-gpu scanout now, so nothing asks the est server for pixels. The
+	# block is kept because it is the record of how easystream was installed and what it needed,
+	# which is what a future desktop that genuinely needs a capture protocol would start from.
 	if [ "$NEEDS_EASYSTREAM" = "1" ]; then
 	ES_VERSION="${EAZYSTREAM_VERSION:-v0.10.2}"
 	ES_PKG="easystream-${ES_VERSION#v}-1-x86_64.pkg.tar-arch.zst"
@@ -2129,126 +2123,6 @@ UNIT
 		ln -sf /etc/systemd/system/desktop.service \
 			"$ROOT/etc/systemd/system/multi-user.target.wants/desktop.service"
 	fi
-
-	# THE CAPTURE PROOF FOR A PORTAL-ONLY DESKTOP, INSTALLED IN THE IMAGE.
-	#
-	# A walkthrough cannot use `see:` for these desktops: `see:` is QEMU's screendump, and
-	# the point of this image is that its evidence comes through the desktop's own portal.
-	# /opt/portal-capture.sh asks easystream for one frame, decodes the PNG, and exits 0 only
-	# when the mean brightness says a desktop was drawn - so a walkthrough's `ssh:` step is
-	# the assertion, and its exit status is the verdict.
-	#
-	# MEASURED on Plasma over virtio-gpu: "portal-capture: PASS mean=133.7 frame=1024x768".
-	# The same script on the same guest reports mean=0.0 when DPMS has blanked the output,
-	# which is what makes it a real test rather than a file-exists check.
-	cat > "$ROOT/opt/portal-capture.sh" <<'PORTALCAP'
-#!/bin/sh
-# Capture ONE frame through the desktop's own portal and report whether it is a real
-# desktop. Runs INSIDE the guest, over ssh, with no screendump anywhere.
-#
-# Exit 0 = a drawn desktop; non-zero = a black/uniform frame, and the output says which.
-#
-# WHY THE MEAN IS THE TEST, MEASURED on this image: a healthy Plasma desktop, a desktop
-# whose output was in DPMS-off, and a stream that never attached ALL produced a PNG of the
-# same 3146804 bytes, because the encoder writes the raw frame size. Size proves nothing;
-# brightness does - a real desktop measures ~128, DPMS-off measures 0.0.
-set -u
-
-PORT="${EAZYSTREAM_PORT:-48079}"
-OUT=/tmp/portal-frame.png
-TMPL=/tmp/est-shot-portal.py
-
-# ALWAYS WRITE OUR OWN, WITH THIS ARGUMENT ORDER. MEASURED: an image can already carry a
-# /tmp/est-shot.py from an earlier probe, and reusing whatever is there made this script call
-# it with the wrong arguments.
-cat > "$TMPL" <<'PY'
-import socket, struct, sys
-port, out = int(sys.argv[1]), sys.argv[2]
-s = socket.create_connection(("127.0.0.1", port), timeout=20)
-s.settimeout(30)
-def recvn(n):
-    b = b""
-    while len(b) < n:
-        c = s.recv(n - len(b))
-        if not c:
-            raise SystemExit("est: connection closed")
-        b += c
-    return b
-s.sendall(struct.pack(">BBI", 0x01, 0, 0))
-typ, flags, ln = struct.unpack(">BBI", recvn(6))
-if ln:
-    recvn(ln)
-s.sendall(struct.pack(">BBI", 0x40, 0, 4) + struct.pack(">I", 1) + struct.pack(">B", 0))
-for _ in range(900):
-    typ, flags, ln = struct.unpack(">BBI", recvn(6))
-    payload = recvn(ln) if ln else b""
-    if typ == 0x41:
-        rid, plen = struct.unpack(">II", payload[:8])
-        open(out, "wb").write(payload[8:8+plen])
-        sys.exit(0)
-raise SystemExit("est: no ShotResp")
-PY
-
-python3 "$TMPL" "$PORT" "$OUT" || exit 2
-[ -s "$OUT" ] || { echo "portal-capture: no png"; exit 3; }
-
-# THE MEAN BRIGHTNESS, DECODED HERE. A fallback by file size was MEASURED WRONG: a black
-# frame and a real desktop both write 3146804 bytes on this image.
-read -r MEAN DIMS <<EOF2
-$(python3 - "$OUT" <<'PY'
-import sys, zlib, struct
-d = open(sys.argv[1], "rb").read()
-pos, idat, w, h, bd, ct = 8, b"", 0, 0, 0, 0
-while pos < len(d):
-    ln = struct.unpack(">I", d[pos:pos+4])[0]
-    typ = d[pos+4:pos+8]
-    data = d[pos+8:pos+8+ln]
-    pos += 12 + ln
-    if typ == b"IHDR":
-        w, h, bd, ct = struct.unpack(">IIBB", data[:10])
-    elif typ == b"IDAT":
-        idat += data
-    elif typ == b"IEND":
-        break
-raw = zlib.decompress(idat)
-ch = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}[ct]
-stride = w * ch + 1
-total = float(0)
-n = 0
-prev = bytearray(w * ch)
-for y in range(h):
-    off = y * stride
-    f = raw[off]
-    row = bytearray(raw[off+1:off+stride])
-    if f == 2:
-        for i in range(len(row)):
-            row[i] = (row[i] + prev[i]) & 0xFF
-    elif f in (1, 4):
-        for i in range(ch, len(row)):
-            row[i] = (row[i] + row[i-ch]) & 0xFF
-    prev = row
-    if y % 8:
-        continue
-    for x in range(0, w, 8):
-        px = row[x*ch:(x+1)*ch]
-        if ch >= 3:
-            total += (px[0] + px[1] + px[2]) / 3.0
-        else:
-            total += px[0]
-        n += 1
-print("%.1f %dx%d" % (total / max(n, 1), w, h))
-PY
-)
-EOF2
-
-if awk -v m="${MEAN:-0}" 'BEGIN{exit !(m > 5)}'; then
-	echo "portal-capture: PASS mean=$MEAN frame=$DIMS"
-	exit 0
-fi
-echo "portal-capture: FAIL mean=${MEAN:-0} (black or DPMS off) frame=$DIMS"
-exit 4
-PORTALCAP
-	chmod 0755 "$ROOT/opt/portal-capture.sh"
 
 	# THE PORTAL FRONTEND MUST KNOW IT IS RUNNING ON KDE, OR IT LOADS NO KDE BACKEND.
 	#
